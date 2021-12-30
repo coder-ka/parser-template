@@ -1,0 +1,277 @@
+/**
+ * TODO: min lengthを持つことで効率化できそう?
+ * TODO: pacrat parsing
+ */
+
+type ParseState = {
+  index: number;
+};
+
+type ASTNode = {
+  expressionType: symbol;
+} & (
+  | {
+      type: "internal";
+      children: ASTNode[];
+    }
+  | {
+      type: "leaf";
+      value: string;
+    }
+);
+
+type ParseResult =
+  | {
+      type: "success";
+      node: ASTNode;
+      state: ParseState;
+    }
+  | {
+      type: "error";
+    };
+
+const lazyExpressionSymbol = Symbol();
+type Expression = {
+  type: symbol;
+  [lazyExpressionSymbol]: boolean;
+  parse(sentence: string, parseState?: ParseState): ParseResult;
+};
+
+const initialParseState: ParseState = {
+  index: 0,
+};
+
+function isLazyExpression(x: any): boolean {
+  return x[lazyExpressionSymbol];
+}
+
+const justExpressionType = Symbol();
+export function just(str: string): Expression {
+  return {
+    type: justExpressionType,
+    [lazyExpressionSymbol]: false,
+    parse(sentence, parseState = initialParseState) {
+      let { index } = parseState;
+
+      for (let i = 0, imax = str.length; i < imax; i++, index++) {
+        if (sentence[index] !== str[i]) {
+          return {
+            type: "error",
+          };
+        }
+      }
+
+      return {
+        type: "success",
+        node: {
+          type: "leaf",
+          expressionType: justExpressionType,
+          value: str,
+        },
+        state: {
+          index,
+        },
+      };
+    },
+  };
+}
+
+export function seq(
+  strings: TemplateStringsArray,
+  ...exprs: Expression[]
+): Expression {
+  const expressions = strings.flatMap((string, i) => {
+    const expr = exprs[i];
+
+    return [
+      ...(string === "" ? [] : [just(string)]),
+      ...(expr === undefined ? [] : [expr]),
+    ];
+  });
+
+  if (expressions.length !== 0 && isLazyExpression(expressions[0]))
+    throw new Error("left recursion is not allowed.");
+
+  const expressionType = Symbol();
+
+  return {
+    type: expressionType,
+    [lazyExpressionSymbol]: false,
+    parse(sentence, parseState = initialParseState) {
+      return expressions.reduce<ParseResult>(
+        (pre, expression) => {
+          if (pre.type === "success") {
+            const res = expression.parse(sentence, pre.state);
+            if (res.type === "success") {
+              return {
+                type: "success",
+                node: {
+                  expressionType,
+                  type: "internal",
+                  children:
+                    pre.node.type === "internal"
+                      ? pre.node.children.concat(
+                          res.node.expressionType === emptyExpressionType ||
+                            res.node.expressionType === justExpressionType
+                            ? []
+                            : [res.node]
+                        )
+                      : [],
+                },
+                state: res.state,
+              };
+            } else {
+              return {
+                type: "error",
+              };
+            }
+          } else if (pre.type === "error") {
+            return pre;
+          } else {
+            return {} as never;
+          }
+        },
+        {
+          type: "success",
+          node: {
+            expressionType,
+            type: "internal",
+            children: [],
+          },
+          state: parseState,
+        }
+      );
+    },
+  };
+}
+
+export function or(...expressions: Expression[]): Expression {
+  const expressionType = Symbol();
+  return {
+    type: expressionType,
+    [lazyExpressionSymbol]: expressions.some(isLazyExpression),
+    parse(sentence, parseState = initialParseState) {
+      for (const expression of expressions) {
+        const res = expression.parse(sentence, parseState);
+
+        if (res.type === "success") {
+          return {
+            type: "success",
+            node: {
+              ...res.node,
+              expressionType,
+            },
+            state: res.state,
+          };
+        }
+      }
+
+      return {
+        type: "error",
+      };
+    },
+  };
+}
+
+export function kleeneClojure(expression: Expression): Expression {
+  const expressionType = Symbol();
+  return {
+    type: expressionType,
+    [lazyExpressionSymbol]: false,
+    parse(sentence, parseState = initialParseState) {
+      let state: ParseState = { ...parseState };
+      const nodes: ASTNode[] = [];
+      while (true) {
+        const res = expression.parse(sentence, state);
+
+        if (res.type === "success") {
+          nodes.push(res.node);
+          state = res.state;
+        } else {
+          break;
+        }
+      }
+
+      return {
+        type: "success",
+        node: {
+          type: "internal",
+          expressionType,
+          children: nodes,
+        },
+        state,
+      };
+    },
+  };
+}
+
+const emptyExpressionType = Symbol();
+export const empty: Expression = {
+  type: emptyExpressionType,
+  [lazyExpressionSymbol]: false,
+  parse(_sentence, parseState = initialParseState) {
+    return {
+      type: "success",
+      node: {
+        expressionType: emptyExpressionType,
+        type: "leaf",
+        value: "",
+      },
+      state: parseState,
+    };
+  },
+};
+
+export function lazy(resolveExpression: () => Expression): Expression {
+  const expressionType = Symbol();
+  return {
+    type: expressionType,
+    [lazyExpressionSymbol]: true,
+    parse(sentence, parseState = initialParseState) {
+      const expression = resolveExpression();
+      const parseResult = expression.parse(sentence, parseState);
+
+      if (parseResult.type === "success") {
+        return {
+          ...parseResult,
+          node: {
+            ...parseResult.node,
+            expressionType,
+          },
+        };
+      } else {
+        return parseResult;
+      }
+    },
+  };
+}
+
+export function regularExpression(regexp: RegExp): Expression {
+  const expressionType = Symbol();
+  return {
+    type: expressionType,
+    [lazyExpressionSymbol]: false,
+    parse(sentence, parseState = initialParseState) {
+      const start = parseState.index;
+      const result = regexp.exec(sentence.slice(start));
+      if (result !== null && result.index === 0) {
+        const matched = result[0];
+        return {
+          type: "success",
+          state: {
+            index: parseState.index + matched.length,
+          },
+          node: {
+            type: "leaf",
+            expressionType,
+            value: matched,
+          },
+        };
+      } else {
+        return {
+          type: "error",
+        };
+      }
+    },
+  };
+}

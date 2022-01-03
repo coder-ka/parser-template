@@ -98,7 +98,7 @@ export function seq(
     type: expressionType,
     [lazyExpressionSymbol]: false,
     parse(sentence, parseState = initialParseState) {
-      return expressions.reduce<ParseResult>(
+      const parseResult = expressions.reduce<ParseResult>(
         (pre, expression) => {
           if (pre.type === "success") {
             const res = expression.parse(sentence, pre.state);
@@ -114,6 +114,10 @@ export function seq(
                           res.node.expressionType === emptyExpressionType ||
                             res.node.expressionType === justExpressionType
                             ? []
+                            : res.node.expressionType ===
+                                kleeneClojureExpressionType &&
+                              res.node.type === "internal"
+                            ? res.node.children
                             : [res.node]
                         )
                       : [],
@@ -141,6 +145,12 @@ export function seq(
           state: parseState,
         }
       );
+
+      if (parseResult.type === 'success' && parseResult.node.type === 'internal' && exprs.length === 1) {
+        parseResult.node = parseResult.node.children[0];
+      }
+
+      return parseResult;
     },
   };
 }
@@ -166,10 +176,10 @@ export function or(...expressions: Expression[]): Expression {
   };
 }
 
+const kleeneClojureExpressionType = Symbol();
 export function kleeneClojure(expression: Expression): Expression {
-  const expressionType = Symbol();
   return {
-    type: expressionType,
+    type: kleeneClojureExpressionType,
     [lazyExpressionSymbol]: false,
     parse(sentence, parseState = initialParseState) {
       let state: ParseState = { ...parseState };
@@ -189,7 +199,7 @@ export function kleeneClojure(expression: Expression): Expression {
         type: "success",
         node: {
           type: "internal",
-          expressionType,
+          expressionType: kleeneClojureExpressionType,
           children: nodes,
         },
         state,

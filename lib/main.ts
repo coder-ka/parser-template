@@ -155,14 +155,7 @@ export function or(...expressions: Expression[]): Expression {
         const res = expression.parse(sentence, parseState);
 
         if (res.type === "success") {
-          return {
-            type: "success",
-            node: {
-              ...res.node,
-              expressionType,
-            },
-            state: res.state,
-          };
+          return res;
         }
       }
 

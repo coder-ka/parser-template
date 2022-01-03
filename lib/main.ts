@@ -31,7 +31,7 @@ type ParseResult =
     };
 
 const lazyExpressionSymbol = Symbol();
-type Expression = {
+export type Expression = {
   type: symbol;
   [lazyExpressionSymbol]: boolean;
   parse(sentence: string, parseState?: ParseState): ParseResult;
@@ -225,26 +225,16 @@ export const empty: Expression = {
   },
 };
 
+const lazyExpressionType = Symbol();
 export function lazy(resolveExpression: () => Expression): Expression {
-  const expressionType = Symbol();
   return {
-    type: expressionType,
+    type: lazyExpressionType,
     [lazyExpressionSymbol]: true,
     parse(sentence, parseState = initialParseState) {
       const expression = resolveExpression();
       const parseResult = expression.parse(sentence, parseState);
 
-      if (parseResult.type === "success") {
-        return {
-          ...parseResult,
-          node: {
-            ...parseResult.node,
-            expressionType,
-          },
-        };
-      } else {
-        return parseResult;
-      }
+      return parseResult;
     },
   };
 }

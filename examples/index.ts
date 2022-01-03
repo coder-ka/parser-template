@@ -12,10 +12,12 @@ const identifier = () => regularExpression(/\w*/);
 
 const attributeName = identifier();
 const numberAttributeValue = regularExpression(/[\d]+/);
-const stringAttributeValue = seq`'${regularExpression(/[^']+/)}'`;
-const booleanAttributeValue = or(seq`true`, seq`false`);
+const stringAttributeValue = regularExpression(/[^']+/);
+const falseAttributeValue = seq`false`;
+const trueAttributeValue = seq`true`;
+const booleanAttributeValue = or(trueAttributeValue, falseAttributeValue);
 const attributeValue = or(
-  stringAttributeValue,
+  seq`'${stringAttributeValue}'`,
   booleanAttributeValue,
   numberAttributeValue
 );
@@ -26,7 +28,10 @@ const predicatesIntersection = seq`:${predicatesUnion}${or(
   empty
 )}`;
 const entityName = identifier();
-const pathQL = seq`/${entityName}${predicatesIntersection}${or(
+const pathQL = seq`/${entityName}${or(
+  predicatesIntersection,
+  empty
+)}${or(
   lazy(() => pathQL),
   empty
 )}`;
@@ -35,91 +40,4 @@ const parseResult = pathQL.parse(
   "/todos:completed+inProgress:id('12345')/piyo"
 );
 
-assert.deepEqual(parseResult, {
-  type: "success",
-  node: {
-    expressionType: pathQL.type,
-    type: "internal",
-    children: [
-      {
-        expressionType: entityName.type,
-        type: "leaf",
-        value: "todos",
-      },
-      {
-        expressionType: predicatesIntersection.type,
-        type: "internal",
-        children: [
-          {
-            expressionType: predicatesUnion.type,
-            type: "internal",
-            children: [
-              {
-                expressionType: predicate.type,
-                type: "internal",
-                children: [
-                  {
-                    expressionType: attributeName.type,
-                    type: "leaf",
-                    value: "completed",
-                  },
-                ],
-              },
-              {
-                expressionType: predicate.type,
-                type: "internal",
-                children: [
-                  {
-                    expressionType: attributeName.type,
-                    type: "leaf",
-                    value: "inProgress",
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            expressionType: predicatesIntersection.type,
-            type: "internal",
-            children: [
-              {
-                expressionType: predicatesUnion.type,
-                type: "internal",
-                children: [
-                  {
-                    expressionType: predicate.type,
-                    type: "internal",
-                    children: [
-                      {
-                        expressionType: attributeName.type,
-                        type: "leaf",
-                        value: "id",
-                      },
-                      {
-                        expressionType: attributeValue.type,
-                        type: "leaf",
-                        value: "12345",
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        expressionType: pathQL.type,
-        type: "internal",
-        children: [
-          {
-            expressionType: entityName.type,
-            type: "leaf",
-            value: "piyo",
-          },
-        ],
-      },
-    ],
-  },
-  state: { index: 39 },
-});
+console.log(JSON.stringify(parseResult));

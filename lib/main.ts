@@ -150,10 +150,10 @@ export function seq(
   };
 }
 
+const orExpressionType = Symbol();
 export function or(...expressions: Expression[]): Expression {
-  const expressionType = Symbol();
   return {
-    type: expressionType,
+    type: orExpressionType,
     [lazyExpressionSymbol]: expressions.some(isLazyExpression),
     parse(sentence, parseState = initialParseState) {
       for (const expression of expressions) {

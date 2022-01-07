@@ -1,8 +1,3 @@
-/**
- * TODO: min lengthを持つことで効率化できそう?
- * TODO: pacrat parsing
- */
-
 type ParseState = {
   index: number;
 };

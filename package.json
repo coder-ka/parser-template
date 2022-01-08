@@ -1,6 +1,6 @@
 {
   "name": "@coder-ka/parser-template",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "MIT",
   "main": "./dist/parser-template.cjs",
   "module": "./dist/parser-template.mjs",

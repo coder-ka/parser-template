@@ -10,19 +10,21 @@ import {
   Expression,
 } from "../lib/main";
 
-const identifier = () => regularExpression(/\w*/);
+const identifier = () => regularExpression(/\w+/);
 
-const attributeName = identifier();
-const numberAttributeValue = regularExpression(/[\d]+/);
+const placeholderAttributeValue = identifier();
 const stringAttributeValue = regularExpression(/[^']+/);
 const falseAttributeValue = seq`false`;
 const trueAttributeValue = seq`true`;
 const booleanAttributeValue = or(trueAttributeValue, falseAttributeValue);
+const numberAttributeValue = regularExpression(/[\d]+/);
 const attributeValue = or(
+  seq`@${placeholderAttributeValue}`,
   seq`'${stringAttributeValue}'`,
   booleanAttributeValue,
   numberAttributeValue
 );
+const attributeName = identifier();
 const predicate = seq`${attributeName}${or(seq`(${attributeValue})`, empty)}`;
 const predicatesUnion = seq`${predicate}${kleeneClojure(seq`+${predicate}`)}`;
 const predicatesIntersection: Expression = seq`:${predicatesUnion}${or(
@@ -39,7 +41,7 @@ const pathQL: Expression = seq`/${entityName}${or(
 )}`;
 
 const parseResult = pathQL.parse(
-  "/todos:completed+inProgress:id('12345')/piyo"
+  "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId)"
 );
 
 test("Correctly parse the pathQL string.", (t) => {
@@ -125,10 +127,38 @@ test("Correctly parse the pathQL string.", (t) => {
               type: "leaf",
               value: "piyo",
             },
+            {
+              expressionType: predicatesIntersection.type,
+              type: "internal",
+              children: [
+                {
+                  expressionType: predicatesUnion.type,
+                  type: "internal",
+                  children: [
+                    {
+                      expressionType: predicate.type,
+                      type: "internal",
+                      children: [
+                        {
+                          expressionType: attributeName.type,
+                          type: "leaf",
+                          value: "id",
+                        },
+                        {
+                          expressionType: placeholderAttributeValue.type,
+                          type: "leaf",
+                          value: "piyoId",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
           ],
         },
       ],
     },
-    state: { index: 44 },
+    state: { index: 56 },
   });
 });

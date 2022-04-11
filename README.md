@@ -13,13 +13,15 @@ npm install @coder-ka/parser-template
 Creating an IPAddressV4 parser.
 
 ```ts
-import { regularExpression, seq } from "@coder-ka/parser-template";
+import { regularExpression, seq, generateParser } from "@coder-ka/parser-template";
 
 const segment = regularExpression(/\d+/);
 
 const ipAddressV4 = seq`${segment}.${segment}.${segment}.${segment}`;
 
-console.log(ipAddressV4.parse("192.168.0.1"));
+const ipAddressV4Parser = generateParser(ipAddressV4);
+
+console.log(ipAddressV4Parser.parse("192.168.0.1"));
 ```
 
 # TODO

@@ -18,11 +18,13 @@ const falseAttributeValue = seq`false`;
 const trueAttributeValue = seq`true`;
 const booleanAttributeValue = or(trueAttributeValue, falseAttributeValue);
 const numberAttributeValue = regularExpression(/[\d]+/);
+const identifierAttributeValue = identifier();
 const attributeValue = or(
   seq`@${placeholderAttributeValue}`,
   seq`'${stringAttributeValue}'`,
   booleanAttributeValue,
-  numberAttributeValue
+  numberAttributeValue,
+  identifierAttributeValue
 );
 const attributeName = identifier();
 const predicate = seq`${attributeName}${or(seq`(${attributeValue})`, empty)}`;
@@ -41,7 +43,7 @@ const pathQL: Expression = seq`/${entityName}${or(
 )}`;
 
 const parseResult = pathQL.parse(
-  "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId)"
+  "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId):user(me)"
 );
 
 test("Correctly parse the pathQL string.", (t) => {
@@ -153,12 +155,40 @@ test("Correctly parse the pathQL string.", (t) => {
                     },
                   ],
                 },
+                {
+                  expressionType: predicatesIntersection.type,
+                  type: "internal",
+                  children: [
+                    {
+                      expressionType: predicatesUnion.type,
+                      type: "internal",
+                      children: [
+                        {
+                          expressionType: predicate.type,
+                          type: "internal",
+                          children: [
+                            {
+                              expressionType: attributeName.type,
+                              type: "leaf",
+                              value: "user",
+                            },
+                            {
+                              expressionType: identifierAttributeValue.type,
+                              type: "leaf",
+                              value: "me",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                }
               ],
             },
           ],
         },
       ],
     },
-    state: { index: 56 },
+    state: { index: 65 },
   });
 });

@@ -141,7 +141,11 @@ export function seq(
         }
       );
 
-      if (parseResult.type === 'success' && parseResult.node.type === 'internal' && exprs.length === 1) {
+      if (
+        parseResult.type === "success" &&
+        parseResult.node.type === "internal" &&
+        exprs.length === 1
+      ) {
         parseResult.node = parseResult.node.children[0];
       }
 
@@ -260,6 +264,24 @@ export function regularExpression(regexp: RegExp): Expression {
           type: "error",
         };
       }
+    },
+  };
+}
+
+export function generateParser(expression: Expression) {
+  return {
+    parse(sentence: string): ParseResult {
+      const parseResult = expression.parse(sentence);
+
+      if (parseResult.type === "success") {
+        if (parseResult.state.index !== sentence.length) {
+          return {
+            type: "error",
+          };
+        }
+      }
+
+      return parseResult;
     },
   };
 }

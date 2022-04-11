@@ -8,6 +8,7 @@ import {
   empty,
   lazy,
   Expression,
+  generateParser,
 } from "../lib/main";
 
 const identifier = () => regularExpression(/\w+/);
@@ -42,7 +43,7 @@ const pathQL: Expression = seq`/${entityName}${or(
   empty
 )}`;
 
-const parseResult = pathQL.parse(
+const parseResult = generateParser(pathQL).parse(
   "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId):user(me)"
 );
 

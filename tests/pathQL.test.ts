@@ -13,15 +13,13 @@ import {
 
 const identifier = () => regularExpression(/\w+/);
 
-const placeholderAttributeValue = identifier();
 const stringAttributeValue = regularExpression(/[^']+/);
 const falseAttributeValue = seq`false`;
 const trueAttributeValue = seq`true`;
 const booleanAttributeValue = or(trueAttributeValue, falseAttributeValue);
 const numberAttributeValue = regularExpression(/[\d]+/);
-const identifierAttributeValue = identifier();
+const identifierAttributeValue = regularExpression(/[\w@]+/);
 const attributeValue = or(
-  seq`@${placeholderAttributeValue}`,
   seq`'${stringAttributeValue}'`,
   booleanAttributeValue,
   numberAttributeValue,
@@ -148,9 +146,9 @@ test("Correctly parse the pathQL string.", (t) => {
                           value: "id",
                         },
                         {
-                          expressionType: placeholderAttributeValue.type,
+                          expressionType: identifierAttributeValue.type,
                           type: "leaf",
-                          value: "piyoId",
+                          value: "@piyoId",
                         },
                       ],
                     },

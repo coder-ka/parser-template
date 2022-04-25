@@ -1,6 +1,6 @@
 {
   "name": "@coder-ka/parser-template",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "license": "MIT",
   "main": "./dist/parser-template.cjs",
   "module": "./dist/parser-template.mjs",
@@ -15,6 +15,7 @@
   ],
   "scripts": {
     "typecheck": "tsc",
+    "prepublishOnly": "npm run build",
     "build": "tsc && concurrently --raw \"npm run build:mjs\" \"npm run build:cjs\"",
     "build:mjs": "esbuild lib/main.ts --bundle --minify --format=esm --outfile=dist/parser-template.mjs",
     "build:cjs": "esbuild lib/main.ts --bundle --minify --format=cjs --outfile=dist/parser-template.cjs",

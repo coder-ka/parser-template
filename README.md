@@ -28,3 +28,4 @@ console.log(ipAddressV4Parser.parse("192.168.0.1"));
 
 - A guide for creating custom primitives
 - Implementing packrat parsing
+- Custom transformation to internal representation

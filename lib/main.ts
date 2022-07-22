@@ -15,7 +15,7 @@ type ASTNode = {
     }
 );
 
-type ParseResult =
+type Translated =
   | {
       type: "success";
       node: ASTNode;
@@ -29,7 +29,7 @@ const lazyExpressionSymbol = Symbol();
 export type Expression = {
   type: symbol;
   [lazyExpressionSymbol]: boolean;
-  parse(sentence: string, parseState?: ParseState): ParseResult;
+  translate(sentence: string, parseState?: ParseState): Translated;
 };
 
 const initialParseState: ParseState = {
@@ -45,7 +45,7 @@ export function just(str: string): Expression {
   return {
     type: justExpressionType,
     [lazyExpressionSymbol]: false,
-    parse(sentence, parseState = initialParseState) {
+    translate(sentence, parseState = initialParseState) {
       let { index } = parseState;
 
       for (let i = 0, imax = str.length; i < imax; i++, index++) {
@@ -92,11 +92,11 @@ export function seq(
   return {
     type: expressionType,
     [lazyExpressionSymbol]: false,
-    parse(sentence, parseState = initialParseState) {
-      const parseResult = expressions.reduce<ParseResult>(
+    translate(sentence, parseState = initialParseState) {
+      const parseResult = expressions.reduce<Translated>(
         (pre, expression) => {
           if (pre.type === "success") {
-            const res = expression.parse(sentence, pre.state);
+            const res = expression.translate(sentence, pre.state);
             if (res.type === "success") {
               return {
                 type: "success",
@@ -159,9 +159,9 @@ export function or(...expressions: Expression[]): Expression {
   return {
     type: orExpressionType,
     [lazyExpressionSymbol]: expressions.some(isLazyExpression),
-    parse(sentence, parseState = initialParseState) {
+    translate(sentence, parseState = initialParseState) {
       for (const expression of expressions) {
-        const res = expression.parse(sentence, parseState);
+        const res = expression.translate(sentence, parseState);
 
         if (res.type === "success") {
           return res;
@@ -180,11 +180,11 @@ export function kleeneClojure(expression: Expression): Expression {
   return {
     type: kleeneClojureExpressionType,
     [lazyExpressionSymbol]: false,
-    parse(sentence, parseState = initialParseState) {
+    translate(sentence, parseState = initialParseState) {
       let state: ParseState = { ...parseState };
       const nodes: ASTNode[] = [];
       while (true) {
-        const res = expression.parse(sentence, state);
+        const res = expression.translate(sentence, state);
 
         if (res.type === "success") {
           nodes.push(res.node);
@@ -211,7 +211,7 @@ const emptyExpressionType = Symbol();
 export const empty: Expression = {
   type: emptyExpressionType,
   [lazyExpressionSymbol]: false,
-  parse(_sentence, parseState = initialParseState) {
+  translate(_sentence, parseState = initialParseState) {
     return {
       type: "success",
       node: {
@@ -229,21 +229,23 @@ export function lazy(resolveExpression: () => Expression): Expression {
   return {
     type: lazyExpressionType,
     [lazyExpressionSymbol]: true,
-    parse(sentence, parseState = initialParseState) {
+    translate(sentence, parseState = initialParseState) {
       const expression = resolveExpression();
-      const parseResult = expression.parse(sentence, parseState);
+      const parseResult = expression.translate(sentence, parseState);
 
       return parseResult;
     },
   };
 }
 
+export function range<T extends number>(from: T, to: T) {}
+
 export function regularExpression(regexp: RegExp): Expression {
   const expressionType = Symbol();
   return {
     type: expressionType,
     [lazyExpressionSymbol]: false,
-    parse(sentence, parseState = initialParseState) {
+    translate(sentence, parseState = initialParseState) {
       const start = parseState.index;
       const result = regexp.exec(sentence.slice(start));
       if (result !== null && result.index === 0) {
@@ -270,8 +272,8 @@ export function regularExpression(regexp: RegExp): Expression {
 
 export function generateParser(expression: Expression) {
   return {
-    parse(sentence: string): ParseResult {
-      const parseResult = expression.parse(sentence);
+    translate(sentence: string): Translated {
+      const parseResult = expression.translate(sentence);
 
       if (parseResult.type === "success") {
         if (parseResult.state.index !== sentence.length) {

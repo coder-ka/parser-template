@@ -41,153 +41,155 @@ const pathQL: Expression = seq`/${entityName}${or(
   empty
 )}`;
 
-const parseResult = generateParser(pathQL).parse(
-  "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId):user(me)"
-);
+test.skip("pathQL translation", () => {
+  const parseResult = generateParser(pathQL).translate(
+    "/todos:completed+inProgress:id('12345')/piyo:id(@piyoId):user(me)"
+  );
 
-test("Correctly parse the pathQL string.", (t) => {
-  t.deepEqual(parseResult, {
-    type: "success",
-    node: {
-      expressionType: pathQL.type,
-      type: "internal",
-      children: [
-        {
-          expressionType: entityName.type,
-          type: "leaf",
-          value: "todos",
-        },
-        {
-          expressionType: predicatesIntersection.type,
-          type: "internal",
-          children: [
-            {
-              expressionType: predicatesUnion.type,
-              type: "internal",
-              children: [
-                {
-                  expressionType: predicate.type,
-                  type: "internal",
-                  children: [
-                    {
-                      expressionType: attributeName.type,
-                      type: "leaf",
-                      value: "completed",
-                    },
-                  ],
-                },
-                {
-                  expressionType: predicate.type,
-                  type: "internal",
-                  children: [
-                    {
-                      expressionType: attributeName.type,
-                      type: "leaf",
-                      value: "inProgress",
-                    },
-                  ],
-                },
-              ],
-            },
-            {
-              expressionType: predicatesIntersection.type,
-              type: "internal",
-              children: [
-                {
-                  expressionType: predicatesUnion.type,
-                  type: "internal",
-                  children: [
-                    {
-                      expressionType: predicate.type,
-                      type: "internal",
-                      children: [
-                        {
-                          expressionType: attributeName.type,
-                          type: "leaf",
-                          value: "id",
-                        },
-                        {
-                          expressionType: stringAttributeValue.type,
-                          type: "leaf",
-                          value: "12345",
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-        {
-          expressionType: pathQL.type,
-          type: "internal",
-          children: [
-            {
-              expressionType: entityName.type,
-              type: "leaf",
-              value: "piyo",
-            },
-            {
-              expressionType: predicatesIntersection.type,
-              type: "internal",
-              children: [
-                {
-                  expressionType: predicatesUnion.type,
-                  type: "internal",
-                  children: [
-                    {
-                      expressionType: predicate.type,
-                      type: "internal",
-                      children: [
-                        {
-                          expressionType: attributeName.type,
-                          type: "leaf",
-                          value: "id",
-                        },
-                        {
-                          expressionType: identifierAttributeValue.type,
-                          type: "leaf",
-                          value: "@piyoId",
-                        },
-                      ],
-                    },
-                  ],
-                },
-                {
-                  expressionType: predicatesIntersection.type,
-                  type: "internal",
-                  children: [
-                    {
-                      expressionType: predicatesUnion.type,
-                      type: "internal",
-                      children: [
-                        {
-                          expressionType: predicate.type,
-                          type: "internal",
-                          children: [
-                            {
-                              expressionType: attributeName.type,
-                              type: "leaf",
-                              value: "user",
-                            },
-                            {
-                              expressionType: identifierAttributeValue.type,
-                              type: "leaf",
-                              value: "me",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                }
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    state: { index: 65 },
+  test("Correctly parse the pathQL string.", (t) => {
+    t.deepEqual(parseResult, {
+      type: "success",
+      node: {
+        expressionType: pathQL.type,
+        type: "internal",
+        children: [
+          {
+            expressionType: entityName.type,
+            type: "leaf",
+            value: "todos",
+          },
+          {
+            expressionType: predicatesIntersection.type,
+            type: "internal",
+            children: [
+              {
+                expressionType: predicatesUnion.type,
+                type: "internal",
+                children: [
+                  {
+                    expressionType: predicate.type,
+                    type: "internal",
+                    children: [
+                      {
+                        expressionType: attributeName.type,
+                        type: "leaf",
+                        value: "completed",
+                      },
+                    ],
+                  },
+                  {
+                    expressionType: predicate.type,
+                    type: "internal",
+                    children: [
+                      {
+                        expressionType: attributeName.type,
+                        type: "leaf",
+                        value: "inProgress",
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                expressionType: predicatesIntersection.type,
+                type: "internal",
+                children: [
+                  {
+                    expressionType: predicatesUnion.type,
+                    type: "internal",
+                    children: [
+                      {
+                        expressionType: predicate.type,
+                        type: "internal",
+                        children: [
+                          {
+                            expressionType: attributeName.type,
+                            type: "leaf",
+                            value: "id",
+                          },
+                          {
+                            expressionType: stringAttributeValue.type,
+                            type: "leaf",
+                            value: "12345",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            expressionType: pathQL.type,
+            type: "internal",
+            children: [
+              {
+                expressionType: entityName.type,
+                type: "leaf",
+                value: "piyo",
+              },
+              {
+                expressionType: predicatesIntersection.type,
+                type: "internal",
+                children: [
+                  {
+                    expressionType: predicatesUnion.type,
+                    type: "internal",
+                    children: [
+                      {
+                        expressionType: predicate.type,
+                        type: "internal",
+                        children: [
+                          {
+                            expressionType: attributeName.type,
+                            type: "leaf",
+                            value: "id",
+                          },
+                          {
+                            expressionType: identifierAttributeValue.type,
+                            type: "leaf",
+                            value: "@piyoId",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    expressionType: predicatesIntersection.type,
+                    type: "internal",
+                    children: [
+                      {
+                        expressionType: predicatesUnion.type,
+                        type: "internal",
+                        children: [
+                          {
+                            expressionType: predicate.type,
+                            type: "internal",
+                            children: [
+                              {
+                                expressionType: attributeName.type,
+                                type: "leaf",
+                                value: "user",
+                              },
+                              {
+                                expressionType: identifierAttributeValue.type,
+                                type: "leaf",
+                                value: "me",
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      state: { index: 65 },
+    });
   });
 });

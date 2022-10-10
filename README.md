@@ -25,6 +25,20 @@ const { value } = ipAddress.translate("192.168.1.1");
 console.log(value);
 ```
 
+# Structural Expression 
+
+- seq
+- or
+- lazy
+- flat
+
+# Built-in Primitive Expressions
+
+- literal(just an string)
+- empty
+- any
+- range
+
 # TODO
 
 - A guide for creating custom primitives

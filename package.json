@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "typecheck": "tsc",
-    "prepublishOnly": "npm run build",
+    "prepare": "npm run build",
     "build": "tsc && concurrently --raw \"npm run build:mjs\" \"npm run build:cjs\"",
     "build:mjs": "esbuild lib/main.ts --bundle --minify --format=esm --outfile=dist/parser-template.mjs",
     "build:cjs": "esbuild lib/main.ts --bundle --minify --format=cjs --outfile=dist/parser-template.cjs",

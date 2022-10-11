@@ -39,6 +39,8 @@ test("empty string returns empty array.", (t) => {
   t.deepEqual(value, []);
 });
 
+// TODO 
+// 先読みのあたりが訳分からなくなってきたので保留
 test("two list item.", (t) => {
   const { value } = translate(
     `

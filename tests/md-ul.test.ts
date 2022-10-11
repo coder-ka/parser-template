@@ -2,24 +2,14 @@ import test from "ava";
 import {
   any,
   empty,
-  // empty,
-  // empty,
   end,
   Expression,
   lazy,
-  // flat,
-  // lazy,
   or,
   repeat,
-  // repeat,
   seq,
   translate,
 } from "../lib/main";
-
-// type MarkdownList<TItem> = {
-//   item: TItem;
-//   children: MarkdownList<TItem>;
-// }[];
 
 function MarkdownUnorderedList(itemExpr: Expression): Expression {
   function ListItems(indent = ""): Expression {
@@ -43,8 +33,6 @@ test("empty string returns empty array.", (t) => {
   t.deepEqual(value, []);
 });
 
-// TODO
-// 先読みのあたりが訳分からなくなってきたので保留
 test("one list item.", (t) => {
   const { value } = translate(
     `

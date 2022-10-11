@@ -13,15 +13,15 @@ npm install @coder-ka/parser-template
 Creating an IPAddressV4 parser.
 
 ```ts
-import { range, seq } from "../lib/main";
+import { integer, seq } from "../lib/main";
 
-const segment = range(1, 255);
+const segment = integer();
 
 const ipAddress = seq`${segment}.${segment}.${segment}.${segment}`;
 
 const { value } = ipAddress.translate("192.168.1.1");
 
-// [192,168,1,1]
+// ["192","168","1","1"]
 console.log(value);
 ```
 

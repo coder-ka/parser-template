@@ -1,18 +1,20 @@
-export type Expression<T> =
+export type Expression =
   | string
-  | SeqExpression<T>
-  | OrExpression<T>
-  | LazyExpression<T>
-  | FlatExpression<T>
-  | PrimitiveExpression<T>;
+  | SeqExpression
+  | OrExpression
+  | LazyExpression
+  | FlatExpression
+  | PrimitiveExpression
+  | {
+      [p: string]: Expression;
+    };
 
 const seqExpr = Symbol();
-export type SeqExpression<T> = {
+export type SeqExpression = {
   [seqExpr]: true;
-  head: string;
-  exprs: Expression<T>[];
+  exprs: Expression[];
 };
-function isSeqExpression(x: any): x is SeqExpression<T> {
+function isSeqExpression(x: any): x is SeqExpression {
   return x[seqExpr];
 }
 export function seq(
@@ -23,7 +25,7 @@ export function seq(
     strings[0],
     ...Array(exprs.length)
       .fill(null)
-      .flatMap((_, i) => [strings[i + 1], exprs[i]]),
+      .flatMap((_, i) => [exprs[i], strings[i + 1]]),
   ].reduce((res, item) => {
     if (item === "") return res;
 
@@ -38,20 +40,10 @@ export function seq(
     res.push(item);
 
     return res;
-  }, [] as (string | Expression | LazyExpression | FlatExpression | OrExpression)[]);
+  }, [] as Expression[]);
 
   return {
     [seqExpr]: true,
-    head: arr.reduce<string>((head, item) => {
-      return (
-        head +
-        (typeof item === "string"
-          ? item
-          : isSeqExpression(item)
-          ? item.head
-          : "")
-      );
-    }, ""),
     exprs: arr,
   };
 }
@@ -65,10 +57,7 @@ export type OrExpression = {
 function isOrExpression(x: any): x is OrExpression {
   return x[orExpr];
 }
-export function or<T1, T2>(
-  e1: Expression<T1>,
-  e2: Expression<T2>
-): OrExpression<T1 | T2> {
+export function or(e1: Expression, e2: Expression): OrExpression {
   return {
     [orExpr]: true,
     e1,
@@ -106,48 +95,49 @@ export function lazy(resolveExpr: () => Expression): LazyExpression {
   };
 }
 
-export function primitive<T>(
+export function primitive(
   p: Pick<
-    PrimitiveExpression<T>,
-    Exclude<keyof PrimitiveExpression<T>, typeof primitiveExpr>
+    PrimitiveExpression,
+    Exclude<keyof PrimitiveExpression, typeof primitiveExpr>
   >
-): PrimitiveExpression<T> {
+): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     ...p,
   };
 }
-
+function isPrimitiveExpression(x: any): x is PrimitiveExpression {
+  return x[primitiveExpr];
+}
 const primitiveExpr = Symbol();
-export type PrimitiveExpression<T> = {
+type ParseOptions = {
+  next?: string;
+};
+export type PrimitiveExpression = {
   [primitiveExpr]: true;
   parse(
     str: string,
     index?: number,
-    options?: {
-      next?: string;
-    }
+    options?: ParseOptions
   ): {
-    value: T;
+    value: unknown;
     index: number;
   };
 };
 
-export function empty<T>(value: T): PrimitiveExpression<T> {
+export function empty<T>(value: T): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
-    parse(str, index = 0) {
-      if (str.length === index) {
-        return {
-          index,
-          value,
-        };
-      } else throw new Error();
+    parse(_str, index = 0) {
+      return {
+        index,
+        value,
+      };
     },
   };
 }
 
-export function any(): PrimitiveExpression<string> {
+export function any(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     parse(str, index?, options?) {
@@ -177,25 +167,19 @@ export function any(): PrimitiveExpression<string> {
   };
 }
 
-export function range(from: number, to: number): PrimitiveExpression<number> {
+export function integer(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     parse(str, index = 0) {
-      let result = "";
+      let value = "";
       while (true) {
         const code = str.charCodeAt(index);
 
         if (code >= 48 && code <= 57) {
-          result += str[index];
+          value += str[index];
 
           index++;
         } else break;
-      }
-
-      const value = Number(result);
-
-      if (value < from || value > to) {
-        throw new Error(`${value} is not between ${from} and ${to}.`);
       }
 
       return {
@@ -206,76 +190,153 @@ export function range(from: number, to: number): PrimitiveExpression<number> {
   };
 }
 
-type ValueOfPrimitive<T> = T extends PrimitiveExpression<infer R> ? R : never;
-
-type ValueOf<TExpression extends Expression> = TExpression extends SeqExpression
-  ? ValueOf<TExpression["exprs"][number]>[]
-  : never;
-
-export function translate<TExpression extends Expression>(
-  str: string,
-  expr: TExpression,
-  index?: number
-): {
-  value: ValueOf<TExpression>;
+type TranslationResult = {
+  value: unknown;
   index: number;
-} {
-  return {};
+};
+
+const objectValueSym = Symbol();
+
+export function translate(str: string, expr: Expression): TranslationResult {
+  function translateExpr(
+    expr: Expression,
+    index = 0,
+    options: ParseOptions = {}
+  ): TranslationResult {
+    if (typeof expr === "string") {
+      for (let i = 0; i < expr.length; i++) {
+        if (str[index] !== expr[i]) {
+          throw new Error(
+            `'${str[index]}' at ${i} does not match expression '${expr}'`
+          );
+        }
+
+        index++;
+      }
+
+      return {
+        value: undefined,
+        index,
+      };
+    } else if (isSeqExpression(expr)) {
+      const value = expr.exprs.reduce((res, expr) => {
+        if (typeof expr === "string") {
+          const { index: newIndex } = translateExpr(expr, index, options);
+
+          index = newIndex;
+
+          return res;
+        } else if (isFlattendExpression(expr)) {
+          const { value, index: newIndex } = translateExpr(
+            expr,
+            index,
+            options
+          );
+
+          index = newIndex;
+
+          if (Array.isArray(value)) {
+            res = res.concat(value);
+          } else {
+            res.push(value);
+          }
+
+          return res;
+        } else if (
+          isSeqExpression(expr) ||
+          isOrExpression(expr) ||
+          isLazyExpression(expr) ||
+          isPrimitiveExpression(expr)
+        ) {
+          const { value, index: newIndex } = translateExpr(
+            expr,
+            index,
+            options
+          );
+
+          index = newIndex;
+
+          res.push(value);
+
+          return res;
+        } else {
+          const { value, index: newIndex } = translateExpr(
+            expr,
+            index,
+            options
+          );
+
+          const found = res.findIndex((x) => (x as any)[objectValueSym]);
+          if (found === -1) {
+            res.push(value);
+          } else {
+            res[res.length - 1] = {
+              ...(res[res.length - 1] as any),
+              ...(value as any),
+            };
+          }
+
+          index = newIndex;
+
+          return res;
+        }
+      }, [] as unknown[]);
+
+      return {
+        value,
+        index,
+      };
+    } else if (isOrExpression(expr)) {
+      try {
+        return translateExpr(expr.e1, index, options);
+      } catch (error) {
+        console.log("or error: ", error);
+        return translateExpr(expr.e2, index, options);
+      }
+    } else if (isLazyExpression(expr)) {
+      return translateExpr(expr.resolveExpr(), index, options);
+    } else if (isFlattendExpression(expr)) {
+      return translateExpr(expr.expr, index, options);
+    } else if (isPrimitiveExpression(expr)) {
+      const { index: newIndex, value } = expr.parse(str, index, options);
+      return {
+        value,
+        index: newIndex,
+      };
+    } else {
+      // object
+      const value = Object.keys(expr).reduce((res, key) => {
+        const { value, index: newIndex } = translateExpr(
+          expr[key],
+          index,
+          options
+        );
+
+        res[key] = value;
+
+        index = newIndex;
+
+        return res;
+      }, {} as Record<keyof typeof expr, TranslationResult["value"]>);
+
+      return {
+        value,
+        index,
+      };
+    }
+  }
+
+  const { index, value } = translateExpr(expr);
+
+  if (index !== str.length) throw new Error("string length does not match.");
+
+  return {
+    index,
+    value,
+  };
 }
 
-// return {
-//   translate(str, index?, options?) {
-//     let result: T[] = [];
-//     let currentIndex = (index === undefined ? 0 : index) + strings[0].length;
-//     for (let i = 0; i < exprs.length; i++) {
-//       const expr = exprs[i];
-//       const literalstr = strings[i + 1];
-
-//       function _translate() {
-//         if (typeof expr === "string") {
-//           return {
-//             values: [],
-//             index: currentIndex + expr.length,
-//           };
-//         } else if (isFlattendExpression(expr)) {
-//           const { index: newIndex, value } = (
-//             isLazyExpression(expr.expr) ? expr.expr() : expr.expr
-//           ).translate(str, currentIndex, {
-//             ...options,
-//             next: literalstr,
-//           });
-
-//           return {
-//             values: value,
-//             newIndex,
-//           };
-//         } else {
-//           const { index: newIndex, value } = (
-//             isLazyExpression(expr) ? expr() : expr
-//           ).translate(str, currentIndex, {
-//             ...options,
-//             next: literalstr,
-//           });
-
-//           return {
-//             values: [value],
-//             newIndex,
-//           };
-//         }
-//       }
-
-//       const { values, newIndex } = _translate();
-
-//       currentIndex = newIndex + literalstr.length;
-
-//       result = result.concat(values);
-//     }
-
-//     if (currentIndex !== str.length) throw new Error();
-
-//     return {
-//       value: result,
-//       index: currentIndex,
-//     };
-//   },
-// };
+export function debug<T>(x: T): T {
+  console.log("debug: ", x);
+  return x;
+}

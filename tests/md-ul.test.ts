@@ -1,13 +1,17 @@
 import test from "ava";
 import {
   any,
-  debug,
   empty,
+  // empty,
+  // empty,
+  end,
   Expression,
-  flat,
   lazy,
+  // flat,
+  // lazy,
   or,
-  OrExpression,
+  repeat,
+  // repeat,
   seq,
   translate,
 } from "../lib/main";
@@ -17,18 +21,18 @@ import {
 //   children: MarkdownList<TItem>;
 // }[];
 
-function MarkdownUnorderedList(
-  itemExpr: Expression,
-  indent = ""
-): Expression {
-  return or(
-    seq`${indent}- ${{ item: itemExpr }}¥n${{
-      children: lazy(() =>
-        MarkdownUnorderedList(itemExpr, debug(indent + "  "))
-      ),
-    }}¥n${flat(lazy(() => MarkdownUnorderedList(itemExpr, indent)))}`,
+function MarkdownUnorderedList(itemExpr: Expression): Expression {
+  function ListItems(indent = ""): Expression {
+    return repeat(seq`${indent}- ${{ item: itemExpr }}
+${{
+  children: or(
+    lazy(() => ListItems(indent + "  ")),
     empty([])
-  );
+  ),
+}}`);
+  }
+
+  return or(end([]), ListItems());
 }
 
 const markdownUnorderedList = MarkdownUnorderedList(any());
@@ -39,52 +43,79 @@ test("empty string returns empty array.", (t) => {
   t.deepEqual(value, []);
 });
 
-// TODO 
+// TODO
 // 先読みのあたりが訳分からなくなってきたので保留
-test("two list item.", (t) => {
+test("one list item.", (t) => {
   const { value } = translate(
     `
-- item
+- item1
 `.slice(1),
     markdownUnorderedList
   );
 
-  t.deepEqual(value, []);
+  t.deepEqual(value, [
+    {
+      item: "item1",
+      children: [],
+    },
+  ]);
 });
 
-// test("markdown unordered list", (t) => {
-//   const { value } = translate(
-//     `
-// - hoge
-//   - fuga
-//   - piyo
-// - puge
-//   - nyonyo`.slice(1),
-//     markdownUnorderedList
-//   );
+test("two list item.", (t) => {
+  const { value } = translate(
+    `
+- item1
+- item2
+`.slice(1),
+    markdownUnorderedList
+  );
 
-//   t.deepEqual(value, [
-//     {
-//       item: "hoge",
-//       children: [
-//         {
-//           item: "fuga",
-//           children: [],
-//         },
-//         {
-//           item: "piyo",
-//           children: [],
-//         },
-//       ],
-//     },
-//     {
-//       item: "puge",
-//       children: [
-//         {
-//           item: "nyonyo",
-//           children: [],
-//         },
-//       ],
-//     },
-//   ]);
-// });
+  t.deepEqual(value, [
+    {
+      item: "item1",
+      children: [],
+    },
+    {
+      item: "item2",
+      children: [],
+    },
+  ]);
+});
+
+test("nested list.", (t) => {
+  const { value } = translate(
+    `
+- hoge
+  - fuga
+  - piyo
+- puge
+  - nyonyo
+`.slice(1),
+    markdownUnorderedList
+  );
+
+  t.deepEqual(value, [
+    {
+      item: "hoge",
+      children: [
+        {
+          item: "fuga",
+          children: [],
+        },
+        {
+          item: "piyo",
+          children: [],
+        },
+      ],
+    },
+    {
+      item: "puge",
+      children: [
+        {
+          item: "nyonyo",
+          children: [],
+        },
+      ],
+    },
+  ]);
+});

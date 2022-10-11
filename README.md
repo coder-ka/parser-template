@@ -25,12 +25,17 @@ const { value } = ipAddress.translate("192.168.1.1");
 console.log(value);
 ```
 
-# Structural Expression 
+# Structural Expressions
 
 - seq
-- or
-- lazy
 - flat
+- object
+
+# Control Expressions
+
+- lazy
+- or
+- repeat
 
 # Built-in Primitive Expressions
 

@@ -48,23 +48,6 @@ export function seq(
   };
 }
 
-const orExpr = Symbol();
-export type OrExpression = {
-  [orExpr]: true;
-  e1: Expression;
-  e2: Expression;
-};
-function isOrExpression(x: any): x is OrExpression {
-  return x[orExpr];
-}
-export function or(e1: Expression, e2: Expression): OrExpression {
-  return {
-    [orExpr]: true,
-    e1,
-    e2,
-  };
-}
-
 const flatExpr = Symbol();
 export type FlatExpression = {
   [flatExpr]: true;
@@ -93,6 +76,34 @@ export function lazy(resolveExpr: () => Expression): LazyExpression {
     [lazyExpr]: true,
     resolveExpr,
   };
+}
+
+const orExpr = Symbol();
+export type OrExpression = {
+  [orExpr]: true;
+  e1: Expression;
+  e2: Expression;
+};
+function isOrExpression(x: any): x is OrExpression {
+  return x[orExpr];
+}
+export function or(e1: Expression, e2: Expression): OrExpression {
+  return {
+    [orExpr]: true,
+    e1,
+    e2,
+  };
+}
+
+export function repeat(expr: Expression): Expression {
+  return flat(
+    seq`${flat(expr)}${flat(
+      or(
+        lazy(() => repeat(expr)),
+        empty([])
+      )
+    )}`
+  );
 }
 
 export function primitive(
@@ -133,6 +144,20 @@ export function empty<T>(value: T): PrimitiveExpression {
         index,
         value,
       };
+    },
+  };
+}
+
+export function end<T>(value: T): PrimitiveExpression {
+  return {
+    [primitiveExpr]: true,
+    parse(str, index = 0) {
+      if (str.length === index) {
+        return {
+          index,
+          value,
+        };
+      } else throw new Error(`string does not end at ${index}`);
     },
   };
 }
@@ -195,8 +220,6 @@ type TranslationResult = {
   index: number;
 };
 
-const objectValueSym = Symbol();
-
 export function translate(str: string, expr: Expression): TranslationResult {
   function translateExpr(
     expr: Expression,
@@ -219,7 +242,12 @@ export function translate(str: string, expr: Expression): TranslationResult {
         index,
       };
     } else if (isSeqExpression(expr)) {
-      const value = expr.exprs.reduce((res, expr) => {
+      const value = expr.exprs.reduce((res, expr, i, arr) => {
+        const next = arr[i + 1];
+        if (typeof next === "string") {
+          options.next = next;
+        }
+
         if (typeof expr === "string") {
           const { index: newIndex } = translateExpr(expr, index, options);
 
@@ -266,21 +294,23 @@ export function translate(str: string, expr: Expression): TranslationResult {
             options
           );
 
-          const found = res.findIndex((x) => (x as any)[objectValueSym]);
-          if (found === -1) {
-            res.push(value);
+          const objectFound = 
+          res.findIndex(x => typeof x === 'object' && x !== null);
+
+          if (objectFound !== -1) {
+            res[objectFound] = {
+              ...res[objectFound],
+              ...(value as object),
+            }
           } else {
-            res[res.length - 1] = {
-              ...(res[res.length - 1] as any),
-              ...(value as any),
-            };
+            res.push(value);
           }
 
           index = newIndex;
 
           return res;
         }
-      }, [] as unknown[]);
+      }, [] as any[]);
 
       return {
         value,

@@ -275,23 +275,6 @@ export function translate(str: string, expr: Expression): TranslationResult {
           }
 
           return res;
-        } else if (
-          isSeqExpression(expr) ||
-          isOrExpression(expr) ||
-          isLazyExpression(expr) ||
-          isPrimitiveExpression(expr)
-        ) {
-          const { value, index: newIndex } = translateExpr(
-            expr,
-            index,
-            options
-          );
-
-          index = newIndex;
-
-          res.push(value);
-
-          return res;
         } else {
           const { value, index: newIndex } = translateExpr(
             expr,

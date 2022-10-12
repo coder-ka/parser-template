@@ -126,6 +126,7 @@ type ParseOptions = {
 };
 export type PrimitiveExpression = {
   [primitiveExpr]: true;
+  __name: string; // for debug
   parse(
     str: string,
     index?: number,
@@ -139,6 +140,7 @@ export type PrimitiveExpression = {
 export function empty<T>(value: T): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
+    __name: "empty",
     parse(_str, index = 0) {
       return {
         index,
@@ -151,6 +153,7 @@ export function empty<T>(value: T): PrimitiveExpression {
 export function end<T>(value: T): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
+    __name: "end",
     parse(str, index = 0) {
       if (str.length === index) {
         return {
@@ -165,6 +168,7 @@ export function end<T>(value: T): PrimitiveExpression {
 export function any(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
+    __name: "any",
     parse(str, index?, options?) {
       const next = options?.next;
 
@@ -195,6 +199,7 @@ export function any(): PrimitiveExpression {
 export function integer(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
+    __name: "integer",
     parse(str, index = 0) {
       let value = "";
       while (true) {
@@ -230,7 +235,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
       for (let i = 0; i < expr.length; i++) {
         if (str[index] !== expr[i]) {
           throw new Error(
-            `'${str[index]}' at ${i} does not match expression '${expr}'`
+            `'${str[index]}' at ${index} does not match expression '${expr}'`
           );
         }
 
@@ -294,14 +299,15 @@ export function translate(str: string, expr: Expression): TranslationResult {
             options
           );
 
-          const objectFound = 
-          res.findIndex(x => typeof x === 'object' && x !== null);
+          const objectFound = res.findIndex(
+            (x) => typeof x === "object" && x !== null
+          );
 
           if (objectFound !== -1) {
             res[objectFound] = {
               ...res[objectFound],
               ...(value as object),
-            }
+            };
           } else {
             res.push(value);
           }
@@ -320,7 +326,6 @@ export function translate(str: string, expr: Expression): TranslationResult {
       try {
         return translateExpr(expr.e1, index, options);
       } catch (error) {
-        console.log("or error: ", error);
         return translateExpr(expr.e2, index, options);
       }
     } else if (isLazyExpression(expr)) {
@@ -358,7 +363,10 @@ export function translate(str: string, expr: Expression): TranslationResult {
 
   const { index, value } = translateExpr(expr);
 
-  if (index !== str.length) throw new Error("string length does not match.");
+  if (index !== str.length)
+    throw new Error(
+      `string length does not match.expected: ${str.length}.actual: ${index}.`
+    );
 
   return {
     index,

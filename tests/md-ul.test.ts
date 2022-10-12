@@ -72,13 +72,12 @@ test("two list item.", (t) => {
 
 test("nested list.", (t) => {
   const { value } = translate(
-    `
-- hoge
+    `- hoge
   - fuga
   - piyo
 - puge
   - nyonyo
-`.slice(1),
+`,
     markdownUnorderedList
   );
 

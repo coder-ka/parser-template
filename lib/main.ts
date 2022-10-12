@@ -1,5 +1,6 @@
 export type Expression =
   | string
+  | RegExp
   | SeqExpression
   | OrExpression
   | LazyExpression
@@ -262,6 +263,19 @@ export function translate(str: string, expr: Expression): TranslationResult {
         value: undefined,
         index,
       };
+    } else if (expr instanceof RegExp) {
+      const matched = expr.exec(str.slice(index));
+
+      if (matched === null || matched.index !== 0) {
+        throw new Error(`Regexp ${expr} does not match string at ${index}.`);
+      }
+
+      const matchedStr = matched[0];
+
+      return {
+        value: matchedStr,
+        index: index + matchedStr.length,
+      };
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
         const next = arr[i + 1];
@@ -269,7 +283,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
           options.next = next;
         }
 
-        if (typeof expr === "string") {
+        if (typeof expr === "string" || expr instanceof RegExp) {
           const { index: newIndex } = translateExpr(expr, index, options);
 
           index = newIndex;

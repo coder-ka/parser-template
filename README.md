@@ -41,7 +41,8 @@ A more complex example parsing markdown unordered list is [here](./tests/md-ul.t
 
 # Built-in Primitive Expressions
 
-- literal(just an string)
+- string
+- regexp
 - empty
 - any
 - integer

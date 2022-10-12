@@ -70,7 +70,7 @@ export type ReduceExpression = {
   expr: Expression;
 };
 function isReducedExpression(x: any): x is ReduceExpression {
-  return x[flatExpr];
+  return x[reduceExpr];
 }
 export function reduce(expr: Expression): ReduceExpression {
   return {

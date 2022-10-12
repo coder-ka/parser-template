@@ -330,7 +330,26 @@ export function translate(str: string, expr: Expression): TranslationResult {
           options
         );
 
-        res[key] = value;
+        if (isFlattendExpression(expr) && Array.isArray(value)) {
+          res[key] = value.reduce((res, value) => {
+            const objectFound = res.findIndex(
+              (x: any) => typeof x === "object" && x !== null
+            );
+
+            if (objectFound !== -1) {
+              res[objectFound] = {
+                ...res[objectFound],
+                ...(value as object),
+              };
+            } else {
+              res.push(value);
+            }
+
+            return res;
+          }, [] as any[]);
+        } else {
+          res[key] = value;
+        }
 
         index = newIndex;
 

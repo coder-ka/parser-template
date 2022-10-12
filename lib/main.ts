@@ -4,6 +4,7 @@ export type Expression =
   | OrExpression
   | LazyExpression
   | FlatExpression
+  | ReduceExpression
   | PrimitiveExpression
   | {
       [p: string]: Expression;
@@ -59,6 +60,21 @@ function isFlattendExpression(x: any): x is FlatExpression {
 export function flat(expr: Expression): FlatExpression {
   return {
     [flatExpr]: true,
+    expr,
+  };
+}
+
+const reduceExpr = Symbol();
+export type ReduceExpression = {
+  [reduceExpr]: true;
+  expr: Expression;
+};
+function isReducedExpression(x: any): x is ReduceExpression {
+  return x[flatExpr];
+}
+export function reduce(expr: Expression): ReduceExpression {
+  return {
+    [reduceExpr]: true,
     expr,
   };
 }
@@ -313,7 +329,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
       }
     } else if (isLazyExpression(expr)) {
       return translateExpr(expr.resolveExpr(), index, options);
-    } else if (isFlattendExpression(expr)) {
+    } else if (isFlattendExpression(expr) || isReducedExpression(expr)) {
       return translateExpr(expr.expr, index, options);
     } else if (isPrimitiveExpression(expr)) {
       const { index: newIndex, value } = expr.parse(str, index, options);
@@ -330,7 +346,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
           options
         );
 
-        if (isFlattendExpression(expr[key]) && Array.isArray(value)) {
+        if (isReducedExpression(expr[key]) && Array.isArray(value)) {
           res[key] = value.reduce((res, item) => {
             const objectFound = res.findIndex(
               (x: any) => typeof x === "object" && x !== null

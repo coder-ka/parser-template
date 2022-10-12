@@ -1,10 +1,10 @@
 import test from "ava";
-import { any, flat, seq, translate } from "../lib/main";
+import { any, reduce, seq, translate } from "../lib/main";
 
 const child = seq`${{ test: any() }}`;
-const parent = seq`${{ child: flat(child) }}`;
+const parent = seq`${{ child: reduce(child) }}`;
 
-test("object flat", (t) => {
+test("object reduce", (t) => {
   const { value } = translate("test", parent);
 
   t.deepEqual(value, [{ child: { test: "test" } }]);

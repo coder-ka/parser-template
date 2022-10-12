@@ -1,6 +1,6 @@
 # Parser Template
 
-Parser Template is a parser generator using [JS's Template literals](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals).
+Parser Template is a parser generator in JavaScript.
 
 # Installation
 
@@ -13,20 +13,35 @@ npm install @coder-ka/parser-template
 Creating an IPAddressV4 parser.
 
 ```ts
-import { range, seq } from "../lib/main";
+import { integer, seq } from "../lib/main";
 
-const segment = range(1, 255);
+const segment = integer();
 
-const ipAddress = seq`${segment}.${segment}.${segment}.${segment}`;
+const ipV4 = seq`${segment}.${segment}.${segment}.${segment}`;
 
-const { value } = ipAddress.translate("192.168.1.1");
+const { value } = ipV4.translate("192.168.1.1");
 
-// [192,168,1,1]
+// ["192","168","1","1"]
 console.log(value);
 ```
 
-# TODO
+A more complex example parsing markdown unordered list is [here](./tests/md-ul.test.ts).
 
-- A guide for creating custom primitives
-- Implementing packrat parsing
-- Custom transformation to internal representation
+# Structural Expressions
+
+- seq
+- flat
+- object
+
+# Control Expressions
+
+- lazy
+- or
+- repeat(at least 1)
+
+# Built-in Primitive Expressions
+
+- literal(just an string)
+- empty
+- any
+- integer

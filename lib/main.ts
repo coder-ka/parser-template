@@ -348,8 +348,36 @@ export function translate(str: string, expr: Expression): TranslationResult {
       }
     } else if (isLazyExpression(expr)) {
       return translateExpr(expr.resolveExpr(), index, context);
-    } else if (isFlattendExpression(expr) || isReducedExpression(expr)) {
+    } else if (isFlattendExpression(expr)) {
       return translateExpr(expr.expr, index, context);
+    } else if (isReducedExpression(expr)) {
+      const { index: newIndex, value } = translateExpr(
+        expr.expr,
+        index,
+        context
+      );
+
+      return {
+        value: Array.isArray(value)
+          ? value.reduce((res, item) => {
+              const objectFound = res.findIndex(
+                (x: any) => typeof x === "object" && x !== null
+              );
+
+              if (objectFound !== -1) {
+                res[objectFound] = {
+                  ...res[objectFound],
+                  ...(item as object),
+                };
+              } else {
+                res.push(item);
+              }
+
+              return res;
+            }, [] as any[])[0]
+          : value,
+        index: newIndex,
+      };
     } else if (isPrimitiveExpression(expr)) {
       const { index: newIndex, value } = expr.parse(str, index, context);
       return {
@@ -365,26 +393,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
           context
         );
 
-        if (isReducedExpression(expr[key]) && Array.isArray(value)) {
-          res[key] = value.reduce((res, item) => {
-            const objectFound = res.findIndex(
-              (x: any) => typeof x === "object" && x !== null
-            );
-
-            if (objectFound !== -1) {
-              res[objectFound] = {
-                ...res[objectFound],
-                ...(item as object),
-              };
-            } else {
-              res.push(item);
-            }
-
-            return res;
-          }, [] as any[])[0];
-        } else {
-          res[key] = value;
-        }
+        res[key] = value;
 
         index = newIndex;
 

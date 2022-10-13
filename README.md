@@ -31,6 +31,7 @@ A more complex example parsing markdown unordered list is [here](https://github.
 
 - seq
 - flat
+- reduce
 - object
 
 # Control Expressions

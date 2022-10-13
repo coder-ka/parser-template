@@ -213,7 +213,6 @@ export function any(childExpr?: Expression): PrimitiveExpression {
       }
 
       const { index: newIndex, value } = read();
-      console.log(value);
 
       return {
         index: newIndex,

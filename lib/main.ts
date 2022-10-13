@@ -182,7 +182,7 @@ export function end<T>(value: T): PrimitiveExpression {
   };
 }
 
-export function any(params?: { split: string }): PrimitiveExpression {
+export function any(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "any",
@@ -216,7 +216,7 @@ export function any(params?: { split: string }): PrimitiveExpression {
 
       return {
         index: newIndex,
-        value: params?.split ? value.split(params.split) : value,
+        value,
       };
     },
   };

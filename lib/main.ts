@@ -182,7 +182,7 @@ export function end<T>(value: T): PrimitiveExpression {
   };
 }
 
-export function any(): PrimitiveExpression {
+export function any(childExpr?: Expression): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "any",
@@ -213,10 +213,11 @@ export function any(): PrimitiveExpression {
       }
 
       const { index: newIndex, value } = read();
+      console.log(value);
 
       return {
         index: newIndex,
-        value,
+        value: childExpr ? translate(value, childExpr).value : value,
       };
     },
   };
@@ -261,7 +262,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
       for (let i = 0; i < expr.length; i++) {
         if (str[index] !== expr[i]) {
           throw new Error(
-            `'${str[index]}' at ${index} does not match expression '${expr}'`
+            `'${str[index]}' at ${index} does not match string '${expr}'`
           );
         }
 
@@ -290,6 +291,8 @@ export function translate(str: string, expr: Expression): TranslationResult {
         const next = arr[i + 1];
         if (typeof next === "string") {
           options.next = next;
+        } else {
+          options.next = undefined;
         }
 
         if (typeof expr === "string" || expr instanceof RegExp) {

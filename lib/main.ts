@@ -11,11 +11,28 @@ export type Expression =
       [p: string]: Expression;
     };
 
+type Head = string | undefined;
+type HasHead = {
+  head: Head;
+};
+
+function isHasHead(x: any): x is HasHead {
+  return (
+    isSeqExpression(x) || isFlattendExpression(x) || isReducedExpression(x)
+  );
+}
+function getHead(x: Expression): Head {
+  if (isHasHead(x)) return x.head;
+  if (typeof x === "string") return x;
+
+  return undefined;
+}
+
 const seqExpr = Symbol();
 export type SeqExpression = {
   [seqExpr]: true;
   exprs: Expression[];
-};
+} & HasHead;
 function isSeqExpression(x: any): x is SeqExpression {
   return x[seqExpr];
 }
@@ -44,7 +61,11 @@ export function seq(
     return res;
   }, [] as Expression[]);
 
+  const first = arr[0];
+  const second = arr[1];
+
   return {
+    head: typeof first === "string" ? first + getHead(second) : getHead(first),
     [seqExpr]: true,
     exprs: arr,
   };
@@ -54,13 +75,14 @@ const flatExpr = Symbol();
 export type FlatExpression = {
   [flatExpr]: true;
   expr: Expression;
-};
+} & HasHead;
 function isFlattendExpression(x: any): x is FlatExpression {
   return x[flatExpr];
 }
 export function flat(expr: Expression): FlatExpression {
   return {
     [flatExpr]: true,
+    head: getHead(expr),
     expr,
   };
 }
@@ -69,13 +91,14 @@ const reduceExpr = Symbol();
 export type ReduceExpression = {
   [reduceExpr]: true;
   expr: Expression;
-};
+} & HasHead;
 function isReducedExpression(x: any): x is ReduceExpression {
   return x[reduceExpr];
 }
 export function reduce(expr: Expression): ReduceExpression {
   return {
     [reduceExpr]: true,
+    head: getHead(expr),
     expr,
   };
 }
@@ -288,11 +311,11 @@ export function translate(str: string, expr: Expression): TranslationResult {
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
         const nextExpr = arr[i + 1];
-        const nextString = typeof nextExpr === "string" ? nextExpr : undefined;
+        const next = nextExpr === undefined ? context.next : getHead(nextExpr);
 
         if (typeof expr === "string" || expr instanceof RegExp) {
           const { index: newIndex } = translateExpr(expr, index, {
-            next: nextString,
+            next,
           });
 
           index = newIndex;
@@ -300,7 +323,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
           return res;
         } else if (isFlattendExpression(expr)) {
           const { value, index: newIndex } = translateExpr(expr, index, {
-            next: nextString,
+            next,
           });
 
           index = newIndex;
@@ -314,7 +337,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
           return res;
         } else {
           const { value, index: newIndex } = translateExpr(expr, index, {
-            next: nextString,
+            next,
           });
 
           const objectFound = res.findIndex(
@@ -386,22 +409,16 @@ export function translate(str: string, expr: Expression): TranslationResult {
       };
     } else {
       // object
-      const value = Object.keys(expr).reduce((res, key) => {
-        const { value, index: newIndex } = translateExpr(
-          expr[key],
-          index,
-          context
-        );
+      const key = Object.keys(expr)[0];
+      const first = expr[key];
+      const { value, index: newIndex } = translateExpr(first, index, context);
 
-        res[key] = value;
-
-        index = newIndex;
-
-        return res;
-      }, {} as Record<keyof typeof expr, TranslationResult["value"]>);
+      index = newIndex;
 
       return {
-        value,
+        value: {
+          [key]: value,
+        },
         index,
       };
     }

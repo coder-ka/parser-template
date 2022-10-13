@@ -38,12 +38,16 @@ A more complex example parsing markdown unordered list is [here](https://github.
 
 - lazy
 - or
-- repeat(at least 1)
 
 # Built-in Primitive Expressions
 
 - string
 - regexp
 - empty
+- end
 - any
 - integer
+
+# Utility Expressions
+
+- repeat(at least 1)

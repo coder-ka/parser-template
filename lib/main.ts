@@ -138,7 +138,7 @@ function isPrimitiveExpression(x: any): x is PrimitiveExpression {
   return x[primitiveExpr];
 }
 const primitiveExpr = Symbol();
-type ParseOptions = {
+type ParseContext = {
   next?: string;
 };
 export type PrimitiveExpression = {
@@ -147,7 +147,7 @@ export type PrimitiveExpression = {
   parse(
     str: string,
     index?: number,
-    options?: ParseOptions
+    options?: ParseContext
   ): {
     value: unknown;
     index: number;
@@ -255,7 +255,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
   function translateExpr(
     expr: Expression,
     index = 0,
-    options: ParseOptions = {}
+    context: ParseContext = {}
   ): TranslationResult {
     if (typeof expr === "string") {
       for (let i = 0; i < expr.length; i++) {
@@ -287,25 +287,21 @@ export function translate(str: string, expr: Expression): TranslationResult {
       };
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
-        const next = arr[i + 1];
-        if (typeof next === "string") {
-          options.next = next;
-        } else {
-          options.next = undefined;
-        }
+        const nextExpr = arr[i + 1];
+        const nextString = typeof nextExpr === "string" ? nextExpr : undefined;
 
         if (typeof expr === "string" || expr instanceof RegExp) {
-          const { index: newIndex } = translateExpr(expr, index, options);
+          const { index: newIndex } = translateExpr(expr, index, {
+            next: nextString,
+          });
 
           index = newIndex;
 
           return res;
         } else if (isFlattendExpression(expr)) {
-          const { value, index: newIndex } = translateExpr(
-            expr,
-            index,
-            options
-          );
+          const { value, index: newIndex } = translateExpr(expr, index, {
+            next: nextString,
+          });
 
           index = newIndex;
 
@@ -317,11 +313,9 @@ export function translate(str: string, expr: Expression): TranslationResult {
 
           return res;
         } else {
-          const { value, index: newIndex } = translateExpr(
-            expr,
-            index,
-            options
-          );
+          const { value, index: newIndex } = translateExpr(expr, index, {
+            next: nextString,
+          });
 
           const objectFound = res.findIndex(
             (x) => typeof x === "object" && x !== null
@@ -348,16 +342,16 @@ export function translate(str: string, expr: Expression): TranslationResult {
       };
     } else if (isOrExpression(expr)) {
       try {
-        return translateExpr(expr.e1, index, options);
+        return translateExpr(expr.e1, index, context);
       } catch (error) {
-        return translateExpr(expr.e2, index, options);
+        return translateExpr(expr.e2, index, context);
       }
     } else if (isLazyExpression(expr)) {
-      return translateExpr(expr.resolveExpr(), index, options);
+      return translateExpr(expr.resolveExpr(), index, context);
     } else if (isFlattendExpression(expr) || isReducedExpression(expr)) {
-      return translateExpr(expr.expr, index, options);
+      return translateExpr(expr.expr, index, context);
     } else if (isPrimitiveExpression(expr)) {
-      const { index: newIndex, value } = expr.parse(str, index, options);
+      const { index: newIndex, value } = expr.parse(str, index, context);
       return {
         value,
         index: newIndex,
@@ -368,7 +362,7 @@ export function translate(str: string, expr: Expression): TranslationResult {
         const { value, index: newIndex } = translateExpr(
           expr[key],
           index,
-          options
+          context
         );
 
         if (isReducedExpression(expr[key]) && Array.isArray(value)) {

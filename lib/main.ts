@@ -182,33 +182,42 @@ export function end<T>(value: T): PrimitiveExpression {
   };
 }
 
-export function any(): PrimitiveExpression {
+export function any(params?: { split: string }): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "any",
     parse(str, index?, options?) {
-      const next = options?.next;
+      function read() {
+        const next = options?.next;
 
-      if (next) {
-        const found = str.indexOf(next, index);
+        if (next) {
+          const found = str.indexOf(next, index);
 
-        if (found === -1) {
+          if (found === -1) {
+            return {
+              index: str.length,
+              value: str.slice(index),
+            };
+          } else {
+            return {
+              index: found,
+              value: str.slice(index, found),
+            };
+          }
+        } else {
           return {
             index: str.length,
             value: str.slice(index),
           };
-        } else {
-          return {
-            index: found,
-            value: str.slice(index, found),
-          };
         }
-      } else {
-        return {
-          index: str.length,
-          value: str.slice(index),
-        };
       }
+
+      const { index: newIndex, value } = read();
+
+      return {
+        index: newIndex,
+        value: params?.split ? value.split(params.split) : value,
+      };
     },
   };
 }

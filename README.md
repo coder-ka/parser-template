@@ -25,7 +25,7 @@ const { value } = ipV4.translate("192.168.1.1");
 console.log(value);
 ```
 
-A more complex example parsing markdown unordered list is [here](./tests/md-ul.test.ts).
+A more complex example parsing markdown unordered list is [here](https://github.com/coder-ka/parser-template/blob/main/tests/md-ul.test.ts).
 
 # Structural Expressions
 

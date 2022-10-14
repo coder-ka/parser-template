@@ -43,6 +43,7 @@ A more complex example parsing markdown unordered list is [here](https://github.
 
 - string
 - regexp
+- function(str: string): unknown
 - empty
 - end
 - any

@@ -1,6 +1,7 @@
 export type Expression =
   | string
   | RegExp
+  | ((str: string) => unknown)
   | SeqExpression
   | OrExpression
   | LazyExpression
@@ -308,12 +309,17 @@ export function translate(str: string, expr: Expression): TranslationResult {
         value: matchedStr,
         index: index + matchedStr.length,
       };
+    } else if (typeof expr === "function") {
+      return {
+        value: expr(str.slice(index)),
+        index: str.length,
+      };
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
         const nextExpr = arr[i + 1];
         const next = nextExpr === undefined ? context.next : getHead(nextExpr);
 
-        if (typeof expr === "string" || expr instanceof RegExp) {
+        if (typeof expr === "string") {
           const { index: newIndex } = translateExpr(expr, index, {
             next,
           });
@@ -333,6 +339,16 @@ export function translate(str: string, expr: Expression): TranslationResult {
           } else {
             res.push(value);
           }
+
+          return res;
+        } else if (expr instanceof RegExp) {
+          const { value, index: newIndex } = translateExpr(expr, index, {
+            next,
+          });
+
+          index = newIndex;
+
+          res.push(value);
 
           return res;
         } else {

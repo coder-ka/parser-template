@@ -106,9 +106,7 @@ export function seq(
   return {
     getHeads(index) {
       return typeof first === "string"
-        ? [first as Head].concat(
-            resolveHeads(second, index).filter((x) => x !== undefined)
-          )
+        ? [first as Head].concat(resolveHeads(second, index))
         : resolveHeads(first, index);
     },
     [seqExpr]: true,
@@ -381,13 +379,13 @@ export function translate(str: string, expr: Expression): TranslationResult {
           if (nextExpr === undefined) {
             return [context.next];
           } else {
-            if (typeof nextExpr === "string" && arr[i + 2] === undefined) {
-              return resolveHeads(nextExpr, index).map((x) =>
-                x && context.next ? x + context.next : x
-              );
-            } else {
-              return resolveHeads(nextExpr, index);
-            }
+            // if (typeof nextExpr === "string" && arr[i + 2] === undefined) {
+            //   return resolveHeads(nextExpr, index).map((x) =>
+            //     x && context.next ? x + context.next : x
+            //   );
+            // } else {
+            return resolveHeads(nextExpr, index);
+            // }
           }
         }
 

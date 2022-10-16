@@ -1,39 +1,77 @@
-export type Expression =
+const debugSym = Symbol();
+type ExpresisonDebugger = {};
+export function withDebug<TExpression extends Expression>(
+  expr: TExpression,
+  exprDebugger: ExpresisonDebugger = {}
+) {
+  expr[debugSym] = exprDebugger;
+
+  return expr;
+}
+
+export type Expression = (
   | string
   | RegExp
   | ((str: string) => unknown)
+  | PrimitiveExpression
   | SeqExpression
   | OrExpression
   | LazyExpression
   | FlatExpression
   | ReduceExpression
-  | PrimitiveExpression
-  | {
-      [p: string]: Expression;
-    };
+  | ObjectExpression
+) & {
+  [debugSym]?: ExpresisonDebugger;
+};
+// TODO
+// | IgnoreExpression;
 
 type Head = string | undefined;
-type HasHead = {
-  head: Head;
+type CanGetHeads = {
+  getHeads: (index: number) => Head[];
 };
 
-function isHasHead(x: any): x is HasHead {
+function isCanGetHeads(x: any): x is CanGetHeads {
   return (
-    isSeqExpression(x) || isFlattendExpression(x) || isReducedExpression(x)
+    isSeqExpression(x) ||
+    isFlattendExpression(x) ||
+    isReducedExpression(x) ||
+    isLazyExpression(x) ||
+    isOrExpression(x)
   );
 }
-function getHead(x: Expression): Head {
-  if (isHasHead(x)) return x.head;
-  if (typeof x === "string") return x;
+function resolveHeads(x: Expression | undefined, index: number): Head[] {
+  if (x === undefined) return [undefined];
+  if (isCanGetHeads(x)) return x.getHeads(index);
+  if (typeof x === "string") return [x];
+  if (isObjectExpression(x)) {
+    return resolveHeads((x as any)[Object.keys(x)[0]], index);
+  }
 
-  return undefined;
+  return [undefined];
+}
+
+type ObjectExpression = {
+  [p: string]: Expression;
+};
+function isObjectExpression(x: any): x is ObjectExpression {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    !isSeqExpression(x) &&
+    !isFlattendExpression(x) &&
+    !isReducedExpression(x) &&
+    !isLazyExpression(x) &&
+    !isOrExpression(x) &&
+    !isPrimitiveExpression(x)
+  );
 }
 
 const seqExpr = Symbol();
 export type SeqExpression = {
   [seqExpr]: true;
   exprs: Expression[];
-} & HasHead;
+} & CanGetHeads;
 function isSeqExpression(x: any): x is SeqExpression {
   return x[seqExpr];
 }
@@ -66,7 +104,13 @@ export function seq(
   const second = arr[1];
 
   return {
-    head: typeof first === "string" ? first + getHead(second) : getHead(first),
+    getHeads(index) {
+      return typeof first === "string"
+        ? [first as Head].concat(
+            resolveHeads(second, index).filter((x) => x !== undefined)
+          )
+        : resolveHeads(first, index);
+    },
     [seqExpr]: true,
     exprs: arr,
   };
@@ -76,14 +120,16 @@ const flatExpr = Symbol();
 export type FlatExpression = {
   [flatExpr]: true;
   expr: Expression;
-} & HasHead;
+} & CanGetHeads;
 function isFlattendExpression(x: any): x is FlatExpression {
   return x[flatExpr];
 }
 export function flat(expr: Expression): FlatExpression {
   return {
     [flatExpr]: true,
-    head: getHead(expr),
+    getHeads(index) {
+      return resolveHeads(expr, index);
+    },
     expr,
   };
 }
@@ -92,14 +138,16 @@ const reduceExpr = Symbol();
 export type ReduceExpression = {
   [reduceExpr]: true;
   expr: Expression;
-} & HasHead;
+} & CanGetHeads;
 function isReducedExpression(x: any): x is ReduceExpression {
   return x[reduceExpr];
 }
 export function reduce(expr: Expression): ReduceExpression {
   return {
     [reduceExpr]: true,
-    head: getHead(expr),
+    getHeads(index) {
+      return resolveHeads(expr, index);
+    },
     expr,
   };
 }
@@ -108,13 +156,16 @@ const lazyExpr = Symbol();
 export type LazyExpression = {
   [lazyExpr]: true;
   resolveExpr: () => Expression;
-};
+} & CanGetHeads;
 function isLazyExpression(x: any): x is LazyExpression {
   return x[lazyExpr];
 }
 export function lazy(resolveExpr: () => Expression): LazyExpression {
   return {
     [lazyExpr]: true,
+    getHeads(index) {
+      return resolveHeads(resolveExpr(), index);
+    },
     resolveExpr,
   };
 }
@@ -124,13 +175,16 @@ export type OrExpression = {
   [orExpr]: true;
   e1: Expression;
   e2: Expression;
-};
+} & CanGetHeads;
 function isOrExpression(x: any): x is OrExpression {
   return x[orExpr];
 }
 export function or(e1: Expression, e2: Expression): OrExpression {
   return {
     [orExpr]: true,
+    getHeads(index) {
+      return resolveHeads(e1, index).concat(resolveHeads(e2, index));
+    },
     e1,
     e2,
   };
@@ -163,7 +217,7 @@ function isPrimitiveExpression(x: any): x is PrimitiveExpression {
 }
 const primitiveExpr = Symbol();
 type ParseContext = {
-  next?: string;
+  next?: Head;
 };
 export type PrimitiveExpression = {
   [primitiveExpr]: true;
@@ -281,6 +335,11 @@ export function translate(str: string, expr: Expression): TranslationResult {
     index = 0,
     context: ParseContext = {}
   ): TranslationResult {
+    if (expr[debugSym]) {
+      console.log("index", index);
+      console.log("context", context);
+    }
+
     if (typeof expr === "string") {
       for (let i = 0; i < expr.length; i++) {
         if (str[index] !== expr[i]) {
@@ -317,62 +376,81 @@ export function translate(str: string, expr: Expression): TranslationResult {
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
         const nextExpr = arr[i + 1];
-        const next = nextExpr === undefined ? context.next : getHead(nextExpr);
 
-        if (typeof expr === "string") {
-          const { index: newIndex } = translateExpr(expr, index, {
-            next,
-          });
-
-          index = newIndex;
-
-          return res;
-        } else if (isFlattendExpression(expr)) {
-          const { value, index: newIndex } = translateExpr(expr, index, {
-            next,
-          });
-
-          index = newIndex;
-
-          if (Array.isArray(value)) {
-            res = res.concat(value);
+        function getNexts(): Head[] {
+          if (nextExpr === undefined) {
+            return [context.next];
           } else {
-            res.push(value);
+            if (typeof nextExpr === "string" && arr[i + 2] === undefined) {
+              return resolveHeads(nextExpr, index).map((x) =>
+                x && context.next ? x + context.next : x
+              );
+            } else {
+              return resolveHeads(nextExpr, index);
+            }
           }
-
-          return res;
-        } else if (expr instanceof RegExp) {
-          const { value, index: newIndex } = translateExpr(expr, index, {
-            next,
-          });
-
-          index = newIndex;
-
-          res.push(value);
-
-          return res;
-        } else {
-          const { value, index: newIndex } = translateExpr(expr, index, {
-            next,
-          });
-
-          const objectFound = res.findIndex(
-            (x) => typeof x === "object" && x !== null
-          );
-
-          if (objectFound !== -1) {
-            res[objectFound] = {
-              ...res[objectFound],
-              ...(value as object),
-            };
-          } else {
-            res.push(value);
-          }
-
-          index = newIndex;
-
-          return res;
         }
+
+        getNexts().some((next, j, nexts) => {
+          try {
+            if (typeof expr === "string") {
+              const { index: newIndex } = translateExpr(expr, index, {
+                next,
+              });
+
+              index = newIndex;
+            } else if (isFlattendExpression(expr)) {
+              const { value, index: newIndex } = translateExpr(expr, index, {
+                next,
+              });
+
+              index = newIndex;
+
+              if (Array.isArray(value)) {
+                res = res.concat(value);
+              } else {
+                res.push(value);
+              }
+            } else if (expr instanceof RegExp) {
+              const { value, index: newIndex } = translateExpr(expr, index, {
+                next,
+              });
+
+              index = newIndex;
+
+              res.push(value);
+            } else {
+              const { value, index: newIndex } = translateExpr(expr, index, {
+                next,
+              });
+
+              const objectFound = res.findIndex(
+                (x) => typeof x === "object" && x !== null
+              );
+
+              if (objectFound !== -1) {
+                res[objectFound] = {
+                  ...res[objectFound],
+                  ...(value as object),
+                };
+              } else {
+                res.push(value);
+              }
+
+              index = newIndex;
+            }
+
+            return true;
+          } catch (error) {
+            if (j === nexts.length - 1) {
+              throw error;
+            } else {
+              return false;
+            }
+          }
+        });
+
+        return res;
       }, [] as any[]);
 
       return {
@@ -418,11 +496,15 @@ export function translate(str: string, expr: Expression): TranslationResult {
         index: newIndex,
       };
     } else if (isPrimitiveExpression(expr)) {
-      const { index: newIndex, value } = expr.parse(str, index, context);
-      return {
-        value,
-        index: newIndex,
-      };
+      try {
+        const { index: newIndex, value } = expr.parse(str, index, context);
+        return {
+          value,
+          index: newIndex,
+        };
+      } catch (error) {
+        throw error;
+      }
     } else {
       // object
       const key = Object.keys(expr)[0];

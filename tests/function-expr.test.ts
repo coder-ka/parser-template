@@ -7,7 +7,5 @@ test("function expr", (t) => {
     seq`words ${any((str) => str.split(" "))}`
   );
 
-  console.log(value);
-
   t.deepEqual(value, [["split", "in", "whitespace"]]);
 });

@@ -452,8 +452,3 @@ export function translate(str: string, expr: Expression): TranslationResult {
     value,
   };
 }
-
-export function debug<T>(x: T): T {
-  console.log("debug: ", x);
-  return x;
-}

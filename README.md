@@ -52,3 +52,4 @@ A more complex example parsing markdown unordered list is [here](https://github.
 # Utility Expressions
 
 - repeat(at least 1)
+- split(delimiter, splitItemExpr)

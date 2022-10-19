@@ -199,6 +199,10 @@ export function repeat(expr: Expression): Expression {
   );
 }
 
+export function split(delimiter: string, expr?: Expression) {
+  return seq`${any(expr)}${flat(repeat(seq`${delimiter}${any(expr)}`))}`;
+}
+
 export function primitive(
   p: Pick<
     PrimitiveExpression,

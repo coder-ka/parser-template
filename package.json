@@ -1,7 +1,10 @@
 {
   "name": "@coder-ka/parser-template",
-  "version": "0.0.25",
+  "version": "0.0.26",
   "license": "MIT",
+  "description": "parser generator in JavaScript.",
+  "author": "KOeda <coder.ka.issues@gmail.com>",
+  "repository": "coder-ka/parser-template",
   "main": "./dist/parser-template.cjs",
   "module": "./dist/parser-template.mjs",
   "exports": {

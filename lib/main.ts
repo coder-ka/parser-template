@@ -26,7 +26,8 @@ export type Expression = (
 // TODO
 // | IgnoreExpression;
 
-type Head = string | undefined;
+const emptyHead = Symbol();
+type Head = string | undefined | typeof emptyHead;
 type CanGetHeads = {
   getHeads: (index: number) => Head[];
 };
@@ -37,9 +38,25 @@ function isCanGetHeads(x: any): x is CanGetHeads {
     isFlattendExpression(x) ||
     isReducedExpression(x) ||
     isLazyExpression(x) ||
+    isOrExpression(x) ||
+    isPrimitiveExpression(x)
+  );
+}
+
+type CanDetectOptional = {
+  isOptionalExpr: () => boolean;
+};
+
+function isCanDetectOptional(x: any): x is CanDetectOptional {
+  return (
+    isSeqExpression(x) ||
+    isFlattendExpression(x) ||
+    isReducedExpression(x) ||
+    isLazyExpression(x) ||
     isOrExpression(x)
   );
 }
+
 function resolveHeads(x: Expression | undefined, index: number): Head[] {
   if (x === undefined) return [undefined];
   if (isCanGetHeads(x)) return x.getHeads(index);
@@ -71,7 +88,8 @@ const seqExpr = Symbol();
 export type SeqExpression = {
   [seqExpr]: true;
   exprs: Expression[];
-} & CanGetHeads;
+} & CanGetHeads &
+  CanDetectOptional;
 function isSeqExpression(x: any): x is SeqExpression {
   return x[seqExpr];
 }
@@ -109,6 +127,13 @@ export function seq(
         ? [first as Head].concat(resolveHeads(second, index))
         : resolveHeads(first, index);
     },
+    isOptionalExpr() {
+      return (
+        arr.length === 1 &&
+        isCanDetectOptional(arr[0]) &&
+        arr[0].isOptionalExpr()
+      );
+    },
     [seqExpr]: true,
     exprs: arr,
   };
@@ -118,7 +143,8 @@ const flatExpr = Symbol();
 export type FlatExpression = {
   [flatExpr]: true;
   expr: Expression;
-} & CanGetHeads;
+} & CanGetHeads &
+  CanDetectOptional;
 function isFlattendExpression(x: any): x is FlatExpression {
   return x[flatExpr];
 }
@@ -128,6 +154,9 @@ export function flat(expr: Expression): FlatExpression {
     getHeads(index) {
       return resolveHeads(expr, index);
     },
+    isOptionalExpr() {
+      return isCanDetectOptional(expr) && expr.isOptionalExpr();
+    },
     expr,
   };
 }
@@ -136,7 +165,8 @@ const reduceExpr = Symbol();
 export type ReduceExpression = {
   [reduceExpr]: true;
   expr: Expression;
-} & CanGetHeads;
+} & CanGetHeads &
+  CanDetectOptional;
 function isReducedExpression(x: any): x is ReduceExpression {
   return x[reduceExpr];
 }
@@ -146,6 +176,9 @@ export function reduce(expr: Expression): ReduceExpression {
     getHeads(index) {
       return resolveHeads(expr, index);
     },
+    isOptionalExpr() {
+      return isCanDetectOptional(expr) && expr.isOptionalExpr();
+    },
     expr,
   };
 }
@@ -154,7 +187,8 @@ const lazyExpr = Symbol();
 export type LazyExpression = {
   [lazyExpr]: true;
   resolveExpr: () => Expression;
-} & CanGetHeads;
+} & CanGetHeads &
+  CanDetectOptional;
 function isLazyExpression(x: any): x is LazyExpression {
   return x[lazyExpr];
 }
@@ -163,6 +197,10 @@ export function lazy(resolveExpr: () => Expression): LazyExpression {
     [lazyExpr]: true,
     getHeads(index) {
       return resolveHeads(resolveExpr(), index);
+    },
+    isOptionalExpr() {
+      const expr = resolveExpr();
+      return isCanDetectOptional(expr) && expr.isOptionalExpr();
     },
     resolveExpr,
   };
@@ -173,13 +211,18 @@ export type OrExpression = {
   [orExpr]: true;
   e1: Expression;
   e2: Expression;
-} & CanGetHeads;
+} & CanGetHeads &
+  CanDetectOptional;
 function isOrExpression(x: any): x is OrExpression {
   return x[orExpr];
 }
 export function or(e1: Expression, e2: Expression): OrExpression {
   return {
     [orExpr]: true,
+    isOptionalExpr: () =>
+      isEmptyExpr(e2) ||
+      (isCanDetectOptional(e1) && e1.isOptionalExpr()) ||
+      (isCanDetectOptional(e2) && e2.isOptionalExpr()),
     getHeads(index) {
       return resolveHeads(e1, index).concat(resolveHeads(e2, index));
     },
@@ -227,7 +270,12 @@ const primitiveExpr = Symbol();
 type ParseContext = {
   next?: Head;
 };
+const emptyExpr = Symbol();
+function isEmptyExpr(x: any) {
+  return !!x[emptyExpr];
+}
 export type PrimitiveExpression = {
+  [emptyExpr]?: boolean;
   [primitiveExpr]: true;
   __name: string; // for debug
   parse(
@@ -238,12 +286,16 @@ export type PrimitiveExpression = {
     value: unknown;
     index: number;
   };
-};
+} & CanGetHeads;
 
 export function empty<T>(value: T): PrimitiveExpression {
   return {
+    [emptyExpr]: true,
     [primitiveExpr]: true,
     __name: "empty",
+    getHeads() {
+      return [emptyHead];
+    },
     parse(_str, index = 0) {
       return {
         index,
@@ -257,6 +309,9 @@ export function end<T>(value: T): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "end",
+    getHeads() {
+      return [undefined];
+    },
     parse(str, index = 0) {
       if (str.length === index) {
         return {
@@ -272,11 +327,14 @@ export function any(childExpr?: Expression): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "any",
+    getHeads() {
+      return [undefined];
+    },
     parse(str, index?, options?) {
       function read() {
         const next = options?.next;
 
-        if (next) {
+        if (next !== emptyHead && next) {
           const found = str.indexOf(next, index);
 
           if (found === -1) {
@@ -308,10 +366,36 @@ export function any(childExpr?: Expression): PrimitiveExpression {
   };
 }
 
+export function exists(target: string): PrimitiveExpression {
+  return {
+    [primitiveExpr]: true,
+    __name: "exists",
+    getHeads() {
+      return [target];
+    },
+    parse(str, index = 0) {
+      for (let i = 0, imax = target.length; i < imax; i++) {
+        const char = target[i];
+        if (str[index + i] !== char) {
+          throw new Error(`${target} not exists at ${index}.`);
+        }
+      }
+
+      return {
+        index: index + target.length,
+        value: true,
+      };
+    },
+  };
+}
+
 export function integer(): PrimitiveExpression {
   return {
     [primitiveExpr]: true,
     __name: "integer",
+    getHeads() {
+      return [undefined];
+    },
     parse(str, index = 0) {
       let value = "";
       while (true) {
@@ -383,74 +467,112 @@ export function translate(str: string, expr: Expression): TranslationResult {
       };
     } else if (isSeqExpression(expr)) {
       const value = expr.exprs.reduce((res, expr, i, arr) => {
-        const nextExpr = arr[i + 1];
-
-        function getNexts(): Head[] {
-          if (nextExpr === undefined) {
+        function getNexts(nextIndex: number): Head[] {
+          if (nextIndex >= arr.length) {
             return [context.next];
           } else {
-            return resolveHeads(nextExpr, index);
+            const nextExpr = arr[nextIndex];
+            return resolveHeads(nextExpr, index).flatMap((head) =>
+              head === emptyHead ? getNexts(nextIndex + 1) : [head]
+            );
           }
         }
 
-        getNexts().some((next, j, nexts) => {
+        const results = getNexts(i + 1).map((next) => {
           try {
             if (typeof expr === "string") {
               const { index: newIndex } = translateExpr(expr, index, {
                 next,
               });
 
-              index = newIndex;
+              return {
+                type: "success" as const,
+                newIndex,
+                applyValue() {},
+              };
             } else if (isFlattendExpression(expr)) {
               const { value, index: newIndex } = translateExpr(expr, index, {
                 next,
               });
 
-              index = newIndex;
-
-              if (Array.isArray(value)) {
-                res = res.concat(value);
-              } else {
-                res.push(value);
-              }
+              return {
+                type: "success" as const,
+                newIndex,
+                applyValue() {
+                  if (Array.isArray(value)) {
+                    res = res.concat(value);
+                  } else {
+                    res.push(value);
+                  }
+                },
+              };
             } else if (expr instanceof RegExp) {
               const { value, index: newIndex } = translateExpr(expr, index, {
                 next,
               });
 
-              index = newIndex;
-
-              res.push(value);
+              return {
+                type: "success" as const,
+                newIndex,
+                applyValue() {
+                  res.push(value);
+                },
+              };
             } else {
               const { value, index: newIndex } = translateExpr(expr, index, {
                 next,
               });
 
-              const objectFound = res.findIndex(
-                (x) => typeof x === "object" && x !== null
-              );
+              return {
+                type: "success" as const,
+                newIndex,
+                applyValue() {
+                  const objectFound = res.findIndex(
+                    (x) => typeof x === "object" && x !== null
+                  );
 
-              if (objectFound !== -1) {
-                res[objectFound] = {
-                  ...res[objectFound],
-                  ...(value as object),
-                };
-              } else {
-                res.push(value);
-              }
-
-              index = newIndex;
+                  if (objectFound !== -1) {
+                    res[objectFound] = {
+                      ...res[objectFound],
+                      ...(value as object),
+                    };
+                  } else {
+                    res.push(value);
+                  }
+                },
+              };
             }
-
-            return true;
           } catch (error) {
-            if (j === nexts.length - 1) {
-              throw error;
-            } else {
-              return false;
-            }
+            return {
+              type: "error" as const,
+              error,
+            };
           }
         });
+
+        if (results.length === 0) {
+          throw new Error("no results error");
+        } else {
+          const res = results.reduce((res, x) => {
+            if (
+              x.newIndex !== undefined &&
+              x.newIndex < (res?.newIndex || Infinity)
+            ) {
+              return x;
+            } else {
+              return res;
+            }
+          }, null as typeof results[0] | null);
+
+          if (res === null) {
+            throw results[0].error;
+          } else {
+            if (res.newIndex !== undefined && res.applyValue !== undefined) {
+              index = res.newIndex;
+              res.applyValue && res.applyValue();
+            }
+          }
+        }
 
         return res;
       }, [] as any[]);

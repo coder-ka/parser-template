@@ -47,6 +47,7 @@ A more complex example parsing markdown unordered list is [here](https://github.
 - empty
 - end
 - any
+- exists
 - integer
 
 # Utility Expressions

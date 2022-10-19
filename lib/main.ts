@@ -200,7 +200,9 @@ export function repeat(expr: Expression): Expression {
 }
 
 export function split(delimiter: string, expr?: Expression) {
-  return seq`${any(expr)}${flat(repeat(seq`${delimiter}${any(expr)}`))}`;
+  return flat(
+    any(seq`${any(expr)}${flat(repeat(seq`${delimiter}${any(expr)}`))}`)
+  );
 }
 
 export function primitive(

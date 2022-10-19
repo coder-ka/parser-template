@@ -201,7 +201,11 @@ export function repeat(expr: Expression): Expression {
 
 export function split(delimiter: string, expr?: Expression) {
   return flat(
-    any(seq`${any(expr)}${flat(repeat(seq`${delimiter}${any(expr)}`))}`)
+    any(
+      seq`${any(expr)}${flat(
+        or(repeat(seq`${delimiter}${any(expr)}`), empty([]))
+      )}`
+    )
   );
 }
 

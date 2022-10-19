@@ -7,6 +7,12 @@ test("split expr", (t) => {
   t.deepEqual(value, ["a", "b", "c", "d"]);
 });
 
+test("split expr2", (t) => {
+  const { value } = translate("a", split(" "));
+
+  t.deepEqual(value, ["a"]);
+});
+
 test("split look-ahead expr", (t) => {
   const { value } = translate("(1,2,3)", seq`(${split(",")})`);
 

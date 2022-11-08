@@ -256,7 +256,7 @@ export function integer(): PrimitiveExpression {
         const code = str.charCodeAt(index);
 
         if (code >= 48 && code <= 57) {
-          value += str[index];
+          value = value + str[index];
 
           index++;
         } else break;

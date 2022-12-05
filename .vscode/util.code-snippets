@@ -1,0 +1,44 @@
+{
+  "Branch Expression.": {
+    "scope": "javascript,typescript",
+    "prefix": "branch-expression",
+    "body": [
+      "if (typeof expr === \"string\") {",
+      "} else if (isExpression(expr)) {",
+      "} else if (expr instanceof RegExp) {",
+      "} else if (typeof expr === \"function\") {",
+      "} else {",
+      "}"
+    ],
+    "description": "b"
+  },
+  "New Expression.": {
+    "scope": "javascript,typescript",
+    "prefix": "new-expression",
+    "body": [
+      "export function $1($2): $3Expression {",
+      "  return createExpression({",
+      "    type: \"$4\",",
+      "    getHeads() {},",
+      "    getMinLength() {},",
+      "    _translate(str, state, context) {},",
+      "  });",
+      "}"
+    ],
+    "description": "b"
+  },
+  "While loop.": {
+    "scope": "javascript,typescript",
+    "prefix": "while-loop",
+    "body": [
+      "      let i = 1,",
+      "        $1 = $2;",
+      "      while (i < exprs.length) {",
+      "        const expr = exprs[i];",
+      "",
+      "        i = (i + 1) | 0;",
+      "      }"
+    ],
+    "description": "b"
+  }
+}

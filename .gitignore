@@ -4,3 +4,4 @@ dist
 *.local
 types
 package-lock.json
+tests-build

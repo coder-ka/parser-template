@@ -1,3 +1,5 @@
+import { nanoid } from "nanoid";
+
 type ParseState = {
   index: number;
 };
@@ -11,7 +13,7 @@ type ParseResult = {
 };
 type MinLength = number;
 type Expression = {
-  id: number;
+  id: string;
   nexts?: Expression[];
   getMinLength(): MinLength;
   getHeads(): Head[];
@@ -21,6 +23,8 @@ type Expression = {
     state: ParseState,
     context: ParseContext
   ): Generator<ParseResult>;
+
+  __debug_info?: unknown;
 };
 function isExpression(x: any): x is Expression {
   return typeof x["_translate"] === "function";
@@ -35,7 +39,7 @@ type ExpressionOrLiteral =
   | Expression;
 
 export function translate(str: string, expr: ExpressionOrLiteral) {
-  const tree = toExpression(seq`${expr}${end()}`)._translate(
+  const tree = toExpression(seq`${flat(expr)}${end()}`)._translate(
     str,
     {
       index: 0,
@@ -58,7 +62,7 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
     }
   } while (true);
 
-  throw error;
+  throw error || new Error("No translation executed.");
 }
 
 function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
@@ -76,14 +80,16 @@ function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
 }
 
 const cache = new Map<string, Generator<ParseResult>>();
-let ExpressionId = -1;
+// let expressionId = 0;
 
 export function createExpression<T extends Expression = Expression>(
-  x: Omit<T, "id">
+  expr: Omit<T, "id">
 ): T {
+  // expressionId = (expressionId + 1) | 0;
+  const id = nanoid(10);
   return {
-    ...x,
-    id: ExpressionId++,
+    ...expr,
+    id,
     _translate: function* (str, state, context): Generator<ParseResult> {
       const nexts = this.nexts || [context.next];
 
@@ -104,24 +110,28 @@ export function createExpression<T extends Expression = Expression>(
               };
 
         const cacheKey =
-          cacheId === null ? null : `${this.id}-${state.index}-${cacheId}`;
+          cacheId === null ? null : `${id}-${state.index}-${cacheId}`;
         const cached = cacheKey === null ? null : cache.get(cacheKey);
 
         if (cached) {
-          return cached;
+          yield* cached;
         } else {
-          if (minLength !== 0 && state.index + minLength > str.length)
+          if (minLength !== 0 && state.index + minLength >= str.length)
             throw new Error("min length error");
 
           try {
-            const result = x._translate(str, state, { next });
+            const result = expr._translate(
+              str,
+              {
+                index: state.index,
+              },
+              { next }
+            );
             if (cacheKey !== null) {
               cache.set(cacheKey, result);
             }
 
-            for (const res of result) {
-              yield res;
-            }
+            yield* result;
           } catch (e) {
             error = e;
           }
@@ -130,7 +140,9 @@ export function createExpression<T extends Expression = Expression>(
         i = (i + 1) | 0;
       }
 
-      throw error;
+      if (error) {
+        throw error;
+      }
     },
   } as T;
 }
@@ -169,12 +181,15 @@ function normalizeSeqExpr(
     i = (i + 1) | 0;
   }
 
-  if (lastIsString) {
-    exprs[exprs.length - 1] = (
-      exprs[exprs.length - 1] as StringLiteralExpression
-    ).concat(stringLiterals[i]);
-  } else {
-    exprs.push(stringLiteralExpr(stringLiterals[i]));
+  const lastStringLiteral = stringLiterals[i];
+  if (lastStringLiteral !== "") {
+    if (lastIsString) {
+      exprs[exprs.length - 1] = (
+        exprs[exprs.length - 1] as StringLiteralExpression
+      ).concat(stringLiterals[i]);
+    } else {
+      exprs.push(stringLiteralExpr(stringLiterals[i]));
+    }
   }
 
   i = 0;
@@ -244,33 +259,41 @@ export function seq(
       return minLength;
     },
     _translate: function* (str, state, context) {
-      let i = 1,
-        value = [] as unknown[],
-        newState = state;
-      while (i < exprs.length) {
-        const expr = exprs[i];
-
-        for (const res of expr._translate(str, newState, context)) {
-          if (isFlatExpression(expr) && Array.isArray(res.value)) {
-            res.value.forEach((item) => {
-              value.push(item);
-            });
-          } else {
-            if (res.value !== undefined) {
-              value.push(res.value);
+      function* results(
+        value: unknown[],
+        state: ParseState,
+        i: number
+      ): Generator<ParseResult> {
+        if (i < exprs.length) {
+          const expr = exprs[i];
+          for (const { state: newState, value: item } of expr._translate(
+            str,
+            state,
+            context
+          )) {
+            if (isFlatExpression(expr) && Array.isArray(item)) {
+              yield* results(value.concat(item), newState, i + 1);
+            } else {
+              yield* results(
+                value.concat(item === undefined ? [] : [item]),
+                newState,
+                i + 1
+              );
             }
           }
-
-          newState = res.state;
+        } else if (i === exprs.length) {
+          yield {
+            value,
+            state,
+          };
         }
-
-        i = (i + 1) | 0;
       }
 
-      yield {
-        value,
-        state: newState,
-      };
+      yield* results([], state, 0);
+    },
+    __debug_info: {
+      type: "seq",
+      exprsLen: exprs.length,
     },
   });
 }
@@ -478,8 +501,7 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
       const heads =
         context.next === undefined ? [undefined] : context.next.getHeads();
 
-      let i = 1,
-        error: unknown;
+      let i = 1;
       while (i < heads.length) {
         const head = heads[i];
 
@@ -506,8 +528,6 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
 
         i = (i + 1) | 0;
       }
-
-      throw error;
     },
   });
 }
@@ -532,7 +552,7 @@ export function exists(target: string) {
           value: true,
         };
       } else {
-        throw new Error();
+        throw new Error(`${target} does not exists at ${state.index}.`);
       }
     },
   });
@@ -542,21 +562,22 @@ type StringLiteralExpression = Expression & {
   type: "stringLiteral";
   concat(str: string): StringLiteralExpression;
 };
-export function stringLiteralExpr(matchStr: string): StringLiteralExpression {
+export function stringLiteralExpr(expected: string): StringLiteralExpression {
   return createExpression({
     type: "stringLiteral",
     concat(str) {
-      return stringLiteralExpr(matchStr + str);
+      return stringLiteralExpr(expected + str);
     },
     getHeads() {
-      return [matchStr];
+      return [expected];
     },
     getMinLength() {
-      return matchStr.length;
+      return expected.length;
     },
     _translate: function* (str, state) {
-      const newIndex = state.index + matchStr.length;
-      if (str.slice(state.index, newIndex) === matchStr) {
+      const newIndex = state.index + expected.length;
+      const actual = str.slice(state.index, newIndex);
+      if (actual === expected) {
         yield {
           state: {
             index: newIndex,
@@ -564,14 +585,20 @@ export function stringLiteralExpr(matchStr: string): StringLiteralExpression {
           value: undefined,
         };
       } else {
-        throw new Error();
+        throw new Error(
+          `string ${actual} does not match ${expected} at ${state.index}.`
+        );
       }
+    },
+    __debug_info: {
+      type: "stringLiteral",
+      expected,
     },
   });
 }
 
 export function regexp(
-  regexp: RegExp,
+  regexpNotSticky: RegExp,
   {
     minLength,
   }: {
@@ -580,6 +607,8 @@ export function regexp(
     minLength: 0,
   }
 ) {
+  const regexp = new RegExp(regexpNotSticky, "y");
+
   return createExpression({
     getHeads() {
       return [regexp];
@@ -591,7 +620,7 @@ export function regexp(
       regexp.lastIndex = state.index;
       const match = regexp.exec(str);
 
-      if (match && match.index === 0) {
+      if (match && match.index === state.index) {
         const value = match[0];
         yield {
           value,
@@ -600,9 +629,21 @@ export function regexp(
           },
         };
       } else {
-        throw new Error();
+        throw new Error(
+          `RegExp ${regexp.toString()} does not match string at ${state.index}`
+        );
       }
     },
+    __debug_info: {
+      type: "regexp",
+      regexp,
+    },
+  });
+}
+
+export function integer() {
+  return regexp(/\d+/, {
+    minLength: 1,
   });
 }
 
@@ -650,12 +691,6 @@ export function obj(obj: { [prop: string]: ExpressionOrLiteral }): Expression {
         };
       }
     },
-  });
-}
-
-export function integer() {
-  return regexp(/\d+/, {
-    minLength: 1,
   });
 }
 

@@ -17,7 +17,7 @@ type Expression = {
   id: string;
   nexts?: Expression[];
   getMinLength(): MinLength;
-  getHeads(): Head[];
+  getHeads(): Generator<Head>;
 
   _translate(
     str: string,
@@ -97,17 +97,15 @@ function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
 }
 
 const cache = new Map<string, Generator<ParseResult>>();
-// let expressionId = 0;
 
 export function createExpression<T extends Expression = Expression>(
   expr: Omit<T, "id">
 ): T {
-  // expressionId = (expressionId + 1) | 0;
   const id = nanoid(10);
   return {
     ...expr,
     id,
-    _translate: function* (str, state, context): Generator<ParseResult> {
+    *_translate(str, state, context): Generator<ParseResult> {
       if (state.index > str.length)
         throw new Error(`Failed to parse string ${str} at ${state.index}.`);
 
@@ -253,30 +251,31 @@ export function seq(
 
   return createExpression({
     type: "seq",
-    getHeads() {
-      let i = 1,
-        heads = exprs[0].getHeads();
-      while (i < exprs.length) {
-        const expr = exprs[i];
-        const nextStringHeads = expr
-          .getHeads()
-          .flatMap((x) => (typeof x === "string" ? [x] : []));
-        if (nextStringHeads.length === 0) {
-          break;
-        } else {
-          heads = heads.flatMap<Head>((head) => {
+    *getHeads() {
+      function* getHeads(head: Head, i: number): Generator<Head> {
+        if (i < exprs.length) {
+          const expr = exprs[i];
+          for (const nextHead of expr.getHeads()) {
             if (typeof head === "string") {
-              return nextStringHeads.map((nextHead) => head + nextHead);
+              if (typeof nextHead === "string") {
+                yield head + nextHead;
+              } else {
+                yield head;
+              }
+            } else if (head instanceof RegExp) {
+              yield head;
+            } else if (head === null) {
+              yield nextHead;
             } else {
-              return [head];
+              yield head;
             }
-          });
+          }
+        } else if (i === exprs.length) {
+          yield head;
         }
-
-        i = (i + 1) | 0;
       }
 
-      return heads;
+      yield* getHeads("", 0);
     },
     getMinLength() {
       let i = 1,
@@ -291,7 +290,7 @@ export function seq(
 
       return minLength;
     },
-    _translate: function* (str, state, context) {
+    *_translate(str, state, context) {
       function* results(
         value: unknown[],
         state: ParseState,
@@ -350,15 +349,14 @@ export function or(
     type: "or",
     a,
     b,
-    getHeads() {
-      // return [undefined];
-      return [...a.getHeads(), ...b.getHeads()];
+    *getHeads() {
+      yield* a.getHeads();
+      yield* b.getHeads();
     },
     getMinLength() {
       return 0;
-      // return Math.min(a.getMinLength(), b.getMinLength());
     },
-    _translate: function* (str, state, context) {
+    *_translate(str, state, context) {
       try {
         console.log("a");
         yield* a._translate(str, state, context);
@@ -382,9 +380,8 @@ type LazyExpression = Expression & {
 export function lazy(resolver: () => Expression): LazyExpression {
   return createExpression({
     type: "lazy",
-    getHeads() {
-      // return [undefined];
-      return resolver().getHeads();
+    *getHeads() {
+      yield* resolver().getHeads();
     },
     getMinLength() {
       return 0;
@@ -409,14 +406,14 @@ export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
   const expr = toExpression(exprOrLiteral);
   return createExpression({
     type: "flat",
-    getHeads() {
-      return expr.getHeads();
+    *getHeads() {
+      yield* expr.getHeads();
     },
     getMinLength() {
       return expr.getMinLength();
     },
-    _translate(str, state, context) {
-      return expr._translate(str, state, context);
+    *_translate(str, state, context) {
+      yield* expr._translate(str, state, context);
     },
     __debug_info: {
       type: "flat",
@@ -434,13 +431,13 @@ export function reduce(exprOrLiteral: ExpressionOrLiteral): ReduceExpression {
   const expr = toExpression(exprOrLiteral);
   return createExpression({
     type: "reduce",
-    getHeads() {
-      return expr.getHeads();
+    *getHeads() {
+      yield* expr.getHeads();
     },
     getMinLength() {
       return expr.getMinLength();
     },
-    _translate: function* (str, state, context) {
+    *_translate(str, state, context) {
       for (const result of expr._translate(str, state, context)) {
         const { state: newState, value } = result;
 
@@ -490,10 +487,10 @@ export function empty<T>(value: T) {
     getMinLength() {
       return 0;
     },
-    getHeads() {
-      return [undefined];
+    *getHeads() {
+      yield undefined;
     },
-    _translate: function* (_str, state) {
+    *_translate(_str, state) {
       console.log("empty");
       yield {
         state,
@@ -505,13 +502,13 @@ export function empty<T>(value: T) {
 
 export function end() {
   return createExpression({
-    getHeads() {
-      return [undefined];
+    *getHeads() {
+      yield undefined;
     },
     getMinLength() {
       return 0;
     },
-    _translate: function* (str, state) {
+    *_translate(str, state) {
       if (str.length === state.index) {
         yield {
           value: undefined,
@@ -530,13 +527,13 @@ export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
       ? undefined
       : toExpression(childExprOrLiteral);
   return createExpression({
-    getHeads() {
-      return [undefined];
+    *getHeads() {
+      yield undefined;
     },
     getMinLength() {
       return 0;
     },
-    _translate: function* (str, state, context) {
+    *_translate(str, state, context) {
       function* handleValue(value: string) {
         console.log(value);
 
@@ -569,10 +566,8 @@ export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
         context.next === undefined ? [undefined] : context.next.getHeads();
 
       console.log("heads:", heads);
-      let i = 0;
-      while (i < heads.length) {
-        const head = heads[i];
 
+      for (const head of heads) {
         if (head instanceof RegExp) {
           head.lastIndex = state.index;
           const match = head.exec(str);
@@ -594,8 +589,6 @@ export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
         } else {
           yield* handleValue(str.slice(state.index));
         }
-
-        i = (i + 1) | 0;
       }
     },
     __debug_info: {
@@ -604,16 +597,15 @@ export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
   });
 }
 
-// exists
 export function exists(target: string) {
   return createExpression({
-    getHeads() {
-      return [target];
+    *getHeads() {
+      yield target;
     },
     getMinLength() {
       return target.length;
     },
-    _translate: function* (str, state) {
+    *_translate(str, state) {
       const sliced = str.slice(state.index, state.index + target.length);
 
       if (sliced === target) {
@@ -640,13 +632,13 @@ export function stringLiteralExpr(expected: string): StringLiteralExpression {
     concat(str) {
       return stringLiteralExpr(expected + str);
     },
-    getHeads() {
-      return [expected];
+    *getHeads() {
+      yield expected;
     },
     getMinLength() {
       return expected.length;
     },
-    _translate: function* (str, state) {
+    *_translate(str, state) {
       const newIndex = state.index + expected.length;
       const actual = str.slice(state.index, newIndex);
       if (actual === expected) {
@@ -682,13 +674,13 @@ export function regexp(
   const regexp = new RegExp(regexpNotSticky, "y");
 
   return createExpression({
-    getHeads() {
-      return [regexp];
+    *getHeads() {
+      yield regexp;
     },
     getMinLength() {
       return minLength;
     },
-    _translate: function* (str, state) {
+    *_translate(str, state) {
       regexp.lastIndex = state.index;
       const match = regexp.exec(str);
 
@@ -721,13 +713,13 @@ export function integer() {
 
 export function fn(fn: (str: string) => unknown): Expression {
   return createExpression({
-    getHeads() {
-      return [undefined];
+    *getHeads() {
+      yield undefined;
     },
     getMinLength() {
       return 0;
     },
-    _translate: function* (str, state) {
+    *_translate(str, state) {
       yield {
         value: fn(str.slice(state.index)),
         state: {
@@ -743,13 +735,13 @@ export function obj(obj: { [prop: string]: ExpressionOrLiteral }): Expression {
   const expr = toExpression(obj[firstKey]);
 
   return createExpression({
-    getHeads() {
-      return expr.getHeads();
+    *getHeads() {
+      yield* expr.getHeads();
     },
     getMinLength() {
       return expr.getMinLength();
     },
-    _translate: function* (str, state, context) {
+    *_translate(str, state, context) {
       for (const result of expr._translate(str, state, context)) {
         const { state: newState, value } = result;
 

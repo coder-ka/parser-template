@@ -35,6 +35,10 @@ fs.stat(entryPath)
       throw new Error(`Specified path ${entryPath} not found.`);
     } else {
       paths.forEach((filePath) => {
+        const isTestFile =
+          filePath.split(".")[filePath.split(".").length - 2] === "test";
+        if (!isTestFile) return;
+
         const outfile = path.join(
           //   os.tmpdir,
           __dirname,

@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import chalk from "picocolors";
 
 type ParseState = {
   index: number;
@@ -39,6 +40,10 @@ type ExpressionOrLiteral =
   | Expression;
 
 export function translate(str: string, expr: ExpressionOrLiteral) {
+  console.log();
+  console.log("translation start.");
+  console.log();
+
   const tree = toExpression(seq`${flat(expr)}${end()}`)._translate(
     str,
     {
@@ -49,20 +54,32 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
     }
   );
 
-  let error: unknown;
+  let error: unknown,
+    result: ParseResult | undefined = undefined;
   do {
     try {
       const { done, value } = tree.next();
 
+      console.log(value, done);
       if (done) break;
 
-      return value;
+      result = value;
+      break;
     } catch (e) {
+      console.log("failed to translate.");
       error = e;
     }
   } while (true);
 
-  throw error || new Error("No translation executed.");
+  if (result) {
+    console.log();
+    console.log("translation end successfully.");
+    console.log();
+
+    return result;
+  } else {
+    throw error || new Error("No translation executed.");
+  }
 }
 
 function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
@@ -91,6 +108,9 @@ export function createExpression<T extends Expression = Expression>(
     ...expr,
     id,
     _translate: function* (str, state, context): Generator<ParseResult> {
+      if (state.index > str.length)
+        throw new Error(`Failed to parse string ${str} at ${state.index}.`);
+
       const nexts = this.nexts || [context.next];
 
       let i = 0,
@@ -119,6 +139,20 @@ export function createExpression<T extends Expression = Expression>(
           if (minLength !== 0 && state.index + minLength >= str.length)
             throw new Error("min length error");
 
+          console.log(
+            "/start translate",
+            `"${str.slice(0, state.index)}${
+              str[state.index] === undefined
+                ? ""
+                : chalk.blue(chalk.underline(str[state.index]))
+            }${str.slice(state.index + 1)}"(${str.length})`,
+            "with",
+            id,
+            expr.__debug_info,
+            "at",
+            state
+          );
+
           try {
             const result = expr._translate(
               str,
@@ -127,6 +161,7 @@ export function createExpression<T extends Expression = Expression>(
               },
               { next }
             );
+
             if (cacheKey !== null) {
               cache.set(cacheKey, result);
             }
@@ -140,9 +175,7 @@ export function createExpression<T extends Expression = Expression>(
         i = (i + 1) | 0;
       }
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
     },
   } as T;
 }
@@ -306,23 +339,36 @@ type OrExpression = Expression & {
   a: Expression;
   b: Expression;
 };
-export function or(a: Expression, b: Expression): OrExpression {
+export function or(
+  aOrLiteral: ExpressionOrLiteral,
+  bOrLiteral: ExpressionOrLiteral
+): OrExpression {
+  const a = toExpression(aOrLiteral),
+    b = toExpression(bOrLiteral);
+
   return createExpression({
     type: "or",
     a,
     b,
     getHeads() {
+      // return [undefined];
       return [...a.getHeads(), ...b.getHeads()];
     },
     getMinLength() {
-      return Math.min(a.getMinLength(), b.getMinLength());
+      return 0;
+      // return Math.min(a.getMinLength(), b.getMinLength());
     },
-    _translate(str, state, context) {
+    _translate: function* (str, state, context) {
       try {
-        return a._translate(str, state, context);
+        console.log("a");
+        yield* a._translate(str, state, context);
       } catch (error) {
-        return b._translate(str, state, context);
+        console.log("b");
+        yield* b._translate(str, state, context);
       }
+    },
+    __debug_info: {
+      type: "or",
     },
   });
 }
@@ -337,13 +383,18 @@ export function lazy(resolver: () => Expression): LazyExpression {
   return createExpression({
     type: "lazy",
     getHeads() {
+      // return [undefined];
       return resolver().getHeads();
     },
     getMinLength() {
-      return resolver().getMinLength();
+      return 0;
+      // return resolver().getMinLength();
     },
     _translate(str, state, context) {
       return resolver()._translate(str, state, context);
+    },
+    __debug_info: {
+      type: "lazy",
     },
   });
 }
@@ -366,6 +417,9 @@ export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
     },
     _translate(str, state, context) {
       return expr._translate(str, state, context);
+    },
+    __debug_info: {
+      type: "flat",
     },
   });
 }
@@ -414,6 +468,9 @@ export function reduce(exprOrLiteral: ExpressionOrLiteral): ReduceExpression {
         }
       }
     },
+    __debug_info: {
+      type: "reduce",
+    },
   });
 }
 
@@ -437,6 +494,7 @@ export function empty<T>(value: T) {
       return [undefined];
     },
     _translate: function* (_str, state) {
+      console.log("empty");
       yield {
         state,
         value,
@@ -466,9 +524,11 @@ export function end() {
   });
 }
 
-export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
-  const expr =
-    exprOrLiteral === undefined ? undefined : toExpression(exprOrLiteral);
+export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
+  const childExpr =
+    childExprOrLiteral === undefined
+      ? undefined
+      : toExpression(childExprOrLiteral);
   return createExpression({
     getHeads() {
       return [undefined];
@@ -478,15 +538,22 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
     },
     _translate: function* (str, state, context) {
       function* handleValue(value: string) {
-        if (expr) {
-          for (const res of expr._translate(
+        console.log(value);
+
+        if (childExpr) {
+          for (const res of childExpr._translate(
             value,
             { index: 0 },
             {
               next: undefined,
             }
           )) {
-            yield res;
+            yield {
+              value: res.value,
+              state: {
+                index: state.index + res.state.index,
+              },
+            };
           }
         } else {
           yield {
@@ -501,7 +568,8 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
       const heads =
         context.next === undefined ? [undefined] : context.next.getHeads();
 
-      let i = 1;
+      console.log("heads:", heads);
+      let i = 0;
       while (i < heads.length) {
         const head = heads[i];
 
@@ -517,10 +585,11 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
           }
         } else if (head) {
           const index = str.indexOf(head, state.index);
+          console.log(index);
           if (index === -1) {
             yield* handleValue(str.slice(state.index));
           } else {
-            yield* handleValue(str.slice(state.index, state.index + index));
+            yield* handleValue(str.slice(state.index, index));
           }
         } else {
           yield* handleValue(str.slice(state.index));
@@ -528,6 +597,9 @@ export function any(exprOrLiteral?: ExpressionOrLiteral): Expression {
 
         i = (i + 1) | 0;
       }
+    },
+    __debug_info: {
+      type: "any",
     },
   });
 }
@@ -586,7 +658,7 @@ export function stringLiteralExpr(expected: string): StringLiteralExpression {
         };
       } else {
         throw new Error(
-          `string ${actual} does not match ${expected} at ${state.index}.`
+          `string '${expected}' does not match '${actual}' at ${state.index}.`
         );
       }
     },

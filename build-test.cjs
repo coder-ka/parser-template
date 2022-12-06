@@ -21,12 +21,20 @@ async function readdirRecursively(dir, parent = "") {
   ];
 }
 
-const entryPath = process.argv[2] || "tests";
+const args = (argv = require("minimist")(process.argv.slice(2)));
+const entryPath = args._[0] || "tests";
+const buildDir = (args.build && args.build[0]) || args.build || "tests-build";
+
+let entryIsDir = false;
+let entryIsFile = false;
 fs.stat(entryPath)
   .then((entry) => {
-    return entry.isFile()
+    entryIsDir = entry.isDirectory();
+    entryIsFile = entry.isFile();
+
+    return entryIsFile
       ? [entryPath]
-      : entry.isDirectory()
+      : entryIsDir
       ? readdirRecursively(entryPath)
       : null;
   })
@@ -34,7 +42,7 @@ fs.stat(entryPath)
     if (paths === null) {
       throw new Error(`Specified path ${entryPath} not found.`);
     } else {
-      paths.forEach((filePath) => {
+      const builds = paths.map((filePath) => {
         const isTestFile =
           filePath.split(".")[filePath.split(".").length - 2] === "test";
         if (!isTestFile) return;
@@ -42,10 +50,10 @@ fs.stat(entryPath)
         const outfile = path.join(
           //   os.tmpdir,
           __dirname,
-          "tests-build",
+          buildDir,
           path.basename(filePath, path.extname(filePath)) + ".cjs"
         );
-        esbuild
+        return esbuild
           .build({
             entryPoints: [filePath],
             platform: "node",
@@ -55,14 +63,37 @@ fs.stat(entryPath)
           })
           .catch(() => process.exit(1))
           .then(() => {
-            const ava = spawn("npx", ["ava", outfile], {
-              stdio: [process.stdin, process.stdout, process.stderr],
-            });
-
-            ava.on("close", (code) => {
-              console.log(`ava exited with code ${code}`);
-            });
+            if (entryIsFile) {
+              return execAva(outfile);
+            }
           });
       });
+
+      return Promise.all(builds);
+    }
+  })
+  .then(() => {
+    if (entryIsDir) {
+      return execAva(buildDir);
     }
   });
+
+async function execAva(path) {
+  return new Promise((res, rej) => {
+    const ava = spawn("npx", ["ava", path], {
+      stdio: [process.stdin, process.stdout, process.stderr],
+    });
+
+    ava.on("end", () => {
+      res();
+    });
+
+    ava.on("error", (err) => {
+      rej(err);
+    });
+
+    ava.on("close", (code) => {
+      console.log(`ava exited with code ${code}`);
+    });
+  });
+}

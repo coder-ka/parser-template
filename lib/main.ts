@@ -167,9 +167,9 @@ export function createExpression<T extends Expression = Expression>(
               { next }
             );
 
-            if (cacheKey !== null) {
-              cache.set(cacheKey, result);
-            }
+            // if (cacheKey !== null) {
+            //   cache.set(cacheKey, result);
+            // }
 
             yield* result;
           } catch (e) {

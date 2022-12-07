@@ -5,7 +5,7 @@ type ParseState = {
   index: number;
 };
 type ParseContext = {
-  next: Expression | undefined;
+  next: ExpressionInternal | undefined;
 };
 type Head = RegExp | string | undefined;
 type ParseResult = {
@@ -17,9 +17,9 @@ type ExprMetadata = {
   head: Head;
   minLength: MinLength;
 };
-export type Expression = {
+type ExpressionInternal = {
   id: string;
-  nexts?: Expression[];
+  nexts?: ExpressionInternal[];
   getMetadata(): Generator<ExprMetadata>;
 
   _translate(
@@ -30,17 +30,18 @@ export type Expression = {
 
   __debug_info?: unknown;
 };
-function isExpression(x: any): x is Expression {
+function isExpression(x: any): x is ExpressionInternal {
   return typeof x["_translate"] === "function";
 }
-export type ExpressionOrLiteral =
+export type Expression = ExpressionOrLiteral;
+type ExpressionOrLiteral =
   | string
   | {
       [prop: string | number | symbol]: ExpressionOrLiteral;
     }
   | ((str: string) => unknown)
   | RegExp
-  | Expression;
+  | ExpressionInternal;
 
 export function translate(str: string, expr: ExpressionOrLiteral) {
   console.log();
@@ -86,7 +87,7 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
   }
 }
 
-function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
+function toExpression(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
   if (typeof exprOrLiteral === "string") {
     return stringLiteralExpr(exprOrLiteral);
   } else if (isExpression(exprOrLiteral)) {
@@ -102,9 +103,9 @@ function toExpression(exprOrLiteral: ExpressionOrLiteral): Expression {
 
 const cache = new Map<string, Generator<ParseResult>>();
 
-export function createExpression<T extends Expression = Expression>(
-  expr: Omit<T, "id">
-): T {
+export function createExpression<
+  T extends ExpressionInternal = ExpressionInternal
+>(expr: Omit<T, "id">): T {
   const id = nanoid(10);
   return {
     ...expr,
@@ -114,8 +115,8 @@ export function createExpression<T extends Expression = Expression>(
         throw new Error(`Failed to parse string ${str} at ${state.index}.`);
 
       function resolveNexts(
-        nexts: Expression["nexts"]
-      ): (Expression | undefined)[] {
+        nexts: ExpressionInternal["nexts"]
+      ): (ExpressionInternal | undefined)[] {
         return (nexts || [context.next]).flatMap((next) =>
           next && isEmptyExpression(next) ? resolveNexts(next?.nexts) : [next]
         );
@@ -189,7 +190,7 @@ function normalizeSeqExpr(
   stringLiterals: TemplateStringsArray,
   placeholders: ExpressionOrLiteral[]
 ) {
-  const exprs: Expression[] = [];
+  const exprs: ExpressionInternal[] = [];
   let i = 0,
     lastIsString = false;
 
@@ -234,7 +235,10 @@ function normalizeSeqExpr(
   while (i < exprs.length) {
     const expr = exprs[i];
     const next = exprs[i + 1];
-    function setNexts(expr: Expression, next: Expression | undefined) {
+    function setNexts(
+      expr: ExpressionInternal,
+      next: ExpressionInternal | undefined
+    ) {
       if (isOrExpression(expr)) {
         setNexts(expr.a, next);
         setNexts(expr.b, next);
@@ -256,7 +260,7 @@ function normalizeSeqExpr(
   return exprs;
 }
 
-type SeqExpression = Expression & {
+type SeqExpression = ExpressionInternal & {
   type: "seq";
 };
 export function seq(
@@ -372,10 +376,10 @@ export function seq(
 function isOrExpression(x: any): x is OrExpression {
   return x["type"] === "or" && isExpression(x);
 }
-type OrExpression = Expression & {
+type OrExpression = ExpressionInternal & {
   type: "or";
-  a: Expression;
-  b: Expression;
+  a: ExpressionInternal;
+  b: ExpressionInternal;
 };
 export function or(
   aOrLiteral: ExpressionOrLiteral,
@@ -408,7 +412,7 @@ export function or(
 // function isLazyExpression(x: any): x is LazyExpression {
 //   return x["type"] === "lazy" && isExpression(x);
 // }
-type LazyExpression = Expression & {
+type LazyExpression = ExpressionInternal & {
   type: "lazy";
 };
 export function lazy(
@@ -432,7 +436,7 @@ export function lazy(
 function isFlatExpression(x: any): x is FlatExpression {
   return x["type"] === "flat" && isExpression(x);
 }
-type FlatExpression = Expression & {
+type FlatExpression = ExpressionInternal & {
   type: "flat";
 };
 export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
@@ -451,7 +455,7 @@ export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
   });
 }
 
-export function reduce(exprOrLiteral: ExpressionOrLiteral): Expression {
+export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
   const expr = toExpression(exprOrLiteral);
   return createExpression({
     *getMetadata() {
@@ -505,7 +509,7 @@ export function repeat(expr: ExpressionOrLiteral): FlatExpression {
 function isEmptyExpression(x: any): x is EmptyExpression {
   return x.type === "empty" && isExpression(x);
 }
-type EmptyExpression = Expression & { type: "empty" };
+type EmptyExpression = ExpressionInternal & { type: "empty" };
 export function empty<T>(value: T): EmptyExpression {
   return createExpression({
     type: "empty",
@@ -548,7 +552,9 @@ export function end() {
   });
 }
 
-export function any(childExprOrLiteral?: ExpressionOrLiteral): Expression {
+export function any(
+  childExprOrLiteral?: ExpressionOrLiteral
+): ExpressionInternal {
   const childExpr =
     childExprOrLiteral === undefined
       ? undefined
@@ -657,7 +663,7 @@ export function exists(target: string) {
   });
 }
 
-type StringLiteralExpression = Expression & {
+type StringLiteralExpression = ExpressionInternal & {
   type: "stringLiteral";
   concat(str: string): StringLiteralExpression;
 };
@@ -746,7 +752,7 @@ export function integer() {
   });
 }
 
-export function fn(fn: (str: string) => unknown): Expression {
+export function fn(fn: (str: string) => unknown): ExpressionInternal {
   return createExpression({
     *getMetadata() {
       yield {
@@ -771,7 +777,7 @@ export function fn(fn: (str: string) => unknown): Expression {
 function isObjectExpression(x: any): x is ObjectExpression {
   return x.type === "obj" && isExpression(x);
 }
-type ObjectExpression = Expression & {
+type ObjectExpression = ExpressionInternal & {
   type: "obj";
 };
 export function obj(obj: {

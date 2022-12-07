@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "ava";
+import chalk from "picocolors";
 
 export function debugTest(
   t: ExecutionContext,
@@ -13,9 +14,9 @@ export function debugTest(
     } catch (error) {
       setTimeout(() => {
         console.error();
-        console.error("◆◆◆◆◆◆◆◆◆◆ ERROR!!!! ◆◆◆◆◆◆◆◆◆◆◆◆");
-        console.error(error.message);
-        console.error("◆◆◆◆◆◆◆◆◆◆ ERROR!!!! ◆◆◆◆◆◆◆◆◆◆◆◆");
+        console.error(chalk.red("◆◆◆◆◆◆◆◆◆◆ ERROR!!!! ◆◆◆◆◆◆◆◆◆◆◆◆"));
+        console.error(chalk.red(error.message));
+        console.error(chalk.red("◆◆◆◆◆◆◆◆◆◆ ERROR!!!! ◆◆◆◆◆◆◆◆◆◆◆◆"));
         console.error();
       }, 1);
       t.pass();

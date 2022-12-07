@@ -17,7 +17,7 @@ type ExprMetadata = {
   head: Head;
   minLength: MinLength;
 };
-type Expression = {
+export type Expression = {
   id: string;
   nexts?: Expression[];
   getMetadata(): Generator<ExprMetadata>;
@@ -33,7 +33,7 @@ type Expression = {
 function isExpression(x: any): x is Expression {
   return typeof x["_translate"] === "function";
 }
-type ExpressionOrLiteral =
+export type ExpressionOrLiteral =
   | string
   | {
       [prop: string | number | symbol]: ExpressionOrLiteral;
@@ -411,7 +411,10 @@ export function or(
 type LazyExpression = Expression & {
   type: "lazy";
 };
-export function lazy(resolver: () => Expression): LazyExpression {
+export function lazy(
+  resolverExprOrLiteral: () => ExpressionOrLiteral
+): LazyExpression {
+  const resolver = () => toExpression(resolverExprOrLiteral());
   return createExpression({
     type: "lazy",
     *getMetadata() {

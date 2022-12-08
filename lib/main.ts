@@ -65,10 +65,16 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
     result: ParseResult | undefined = undefined;
   do {
     const { done, value } = tree.next();
-
-    console.log("value:", value, "done:", done);
     if (done) break;
 
+    console.log();
+    console.log(
+      "translation end: ",
+      value.value,
+      value.state,
+      value.error?.message
+    );
+    console.log();
     if (value.error) {
       error = value.error;
     } else {
@@ -98,7 +104,8 @@ function normalizeExpressionLiteral(
   if (typeof exprOrLiteral === "string") {
     return stringLiteralExpr(exprOrLiteral);
   } else if (isExpression(exprOrLiteral)) {
-    return exprOrLiteral;
+    // for preventing share .next references.
+    return { ...exprOrLiteral };
   } else if (exprOrLiteral instanceof RegExp) {
     return regexp(exprOrLiteral);
   } else if (typeof exprOrLiteral === "function") {
@@ -127,8 +134,11 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
       }
 
       const next = this.next || context.next;
+      const childContext: ParseContext = {
+        next,
+      };
       console.log();
-      console.log("next:", next?.__debug_info);
+      console.log(chalk.bgYellow("next:"), next?.__debug_info);
 
       const nextId = next === undefined ? "" : next.id;
       const cacheKey = `${id}-${state.index}-${nextId}`;
@@ -144,7 +154,7 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
               : `${str.slice(0, state.index)}${
                   str[state.index] === undefined
                     ? ""
-                    : chalk.bold(chalk.blue(chalk.underline(str[state.index])))
+                    : chalk.white(chalk.bgBlue(str[state.index]))
                 }${str.slice(state.index + 1)}`
           }(${str.length})`,
           "with",
@@ -158,7 +168,7 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
           {
             index: state.index,
           },
-          { next }
+          childContext
         );
 
         // 実行済みのgeneratorをキャッシュしても意味ない
@@ -167,6 +177,43 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
         // }
 
         yield* result;
+        // for (const res of result) {
+        //   if (res.error) {
+        //     yield res;
+        //   } else {
+        //     if (next === undefined) {
+        //       yield res;
+        //     } else {
+        //       for (const nextRes of next._translate(
+        //         str,
+        //         res.state,
+        //         childContext
+        //       )) {
+        //         if (nextRes.error) {
+        //           yield {
+        //             error: nextRes.error,
+        //             state: nextRes.state,
+        //             value: res.value,
+        //           };
+        //         } else {
+        //           if (isFlatExpression(next) && Array.isArray(nextRes.value)) {
+        //             yield {
+        //               error: undefined,
+        //               state: nextRes.state,
+        //               value: [res.value, ...nextRes.value],
+        //             };
+        //           } else {
+        //             yield {
+        //               error: undefined,
+        //               state: nextRes.state,
+        //               value: [res.value, nextRes.value],
+        //             };
+        //           }
+        //         }
+        //       }
+        //     }
+        //   }
+        // }
       }
     },
   } as T;
@@ -218,10 +265,11 @@ function normalizeSeqExpr(
   }
 
   i = 0;
+
   while (i < exprs.length) {
-    const expr = exprs[i];
-    const next = exprs[i + 1];
-    expr.next = next;
+    // skip empty expression.
+    exprs[i].next = exprs.find((expr, j) => j > i && !isEmptyExpression(expr));
+    console.log(i, ".next", exprs[i + 1]?.__debug_info);
 
     i = (i + 1) | 0;
   }
@@ -294,6 +342,7 @@ export function seq(
       ): Generator<ParseResult> {
         if (i < exprs.length) {
           const expr = exprs[i];
+
           for (const {
             state: itemState,
             value: itemValue,
@@ -346,7 +395,7 @@ export function seq(
     __debug_info: {
       type: "seq",
       len: exprs.length,
-      exprs: exprs.map((x) => x.__debug_info),
+      // exprs: exprs.map((x) => x.__debug_info),
     },
   });
 }
@@ -489,9 +538,9 @@ export function repeat(expr: ExpressionOrLiteral): FlatExpression {
   );
 }
 
-// function isEmptyExpression(x: any): x is EmptyExpression {
-//   return x.type === "empty" && isExpression(x);
-// }
+function isEmptyExpression(x: any): x is EmptyExpression {
+  return x.type === "empty" && isExpression(x);
+}
 type EmptyExpression = ExpressionLeaf & { type: "empty" };
 export function empty<T>(value: T): EmptyExpression {
   return createExpression({
@@ -537,6 +586,9 @@ export function end() {
           error: new Error(`${state.index} does not end at ${str.length}.`),
         };
       }
+    },
+    __debug_info: {
+      type: "end",
     },
   });
 }
@@ -593,7 +645,7 @@ export function any(childExprOrLiteral?: ExpressionOrLiteral): ExpressionLeaf {
           : context.next.getMetadata();
 
       for (const info of infos) {
-        console.log("head:", info.head);
+        console.log(chalk.bgGreen("head:"), info.head, "with any at", state);
         if (info.head instanceof RegExp) {
           info.head.lastIndex = state.index;
           const match = info.head.exec(str);

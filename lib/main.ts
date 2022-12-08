@@ -147,6 +147,10 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
               return resolveNexts(next.nexts, context).flatMap((nextsNext) =>
                 resolveNexts([next.a, next.b], { next: nextsNext })
               );
+            } else if (isObjectExpression(next)) {
+              return resolveNexts(next.nexts, context).flatMap((nextsNext) =>
+                resolveNexts([next.expr], { next: nextsNext })
+              );
             } else {
               return [next];
             }
@@ -879,6 +883,8 @@ function isObjectExpression(x: any): x is ObjectExpression {
 }
 type ObjectExpression = ExpressionLeaf & {
   type: "obj";
+  firstKey: string;
+  expr: ExpressionLeaf;
 };
 export function obj(obj: {
   [prop: string]: ExpressionOrLiteral;
@@ -888,6 +894,8 @@ export function obj(obj: {
 
   return createExpression({
     type: "obj",
+    firstKey,
+    expr,
     *getMetadata() {
       yield* expr.getMetadata();
     },

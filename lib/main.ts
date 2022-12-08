@@ -5,21 +5,22 @@ type ParseState = {
   index: number;
 };
 type ParseContext = {
-  next: ExpressionInternal | undefined;
+  next: ExpressionLeaf | undefined;
 };
 type Head = RegExp | string | undefined;
 type ParseResult = {
-  value: unknown;
   state: ParseState;
+  value: unknown;
+  error: Error | undefined;
 };
 type MinLength = number;
 type ExprMetadata = {
   head: Head;
   minLength: MinLength;
 };
-type ExpressionInternal = {
+type ExpressionLeaf = {
   id: string;
-  nexts?: ExpressionInternal[];
+  next?: ExpressionLeaf;
   getMetadata(): Generator<ExprMetadata>;
 
   _translate(
@@ -30,7 +31,7 @@ type ExpressionInternal = {
 
   __debug_info?: unknown;
 };
-function isExpression(x: any): x is ExpressionInternal {
+function isExpression(x: any): x is ExpressionLeaf {
   return typeof x["_translate"] === "function";
 }
 export type Expression = ExpressionOrLiteral;
@@ -41,14 +42,16 @@ type ExpressionOrLiteral =
     }
   | ((str: string) => unknown)
   | RegExp
-  | ExpressionInternal;
+  | ExpressionLeaf;
 
 export function translate(str: string, expr: ExpressionOrLiteral) {
   console.log();
   console.log(chalk.blue("translation start."));
   console.log();
 
-  const tree = toExpression(seq`${flat(expr)}${end()}`)._translate(
+  const tree = normalizeExpressionLiteral(
+    seq`${flat(expr)}${end()}`
+  )._translate(
     str,
     {
       index: 0,
@@ -61,18 +64,16 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
   let error: unknown,
     result: ParseResult | undefined = undefined;
   do {
-    try {
-      const { done, value } = tree.next();
+    const { done, value } = tree.next();
 
-      console.log("value:", value, "done:", done);
-      if (done) break;
+    console.log("value:", value, "done:", done);
+    if (done) break;
 
+    if (value.error) {
+      error = value.error;
+    } else {
       result = value;
       break;
-    } catch (e) {
-      console.log();
-      console.log("failed to translate.");
-      error = e;
     }
   } while (true);
 
@@ -83,11 +84,17 @@ export function translate(str: string, expr: ExpressionOrLiteral) {
 
     return result;
   } else {
+    console.log();
+    console.log(chalk.red("failed to translate."));
+    console.log();
+
     throw error || new Error("No translation executed.");
   }
 }
 
-function toExpression(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
+function normalizeExpressionLiteral(
+  exprOrLiteral: ExpressionOrLiteral
+): ExpressionLeaf {
   if (typeof exprOrLiteral === "string") {
     return stringLiteralExpr(exprOrLiteral);
   } else if (isExpression(exprOrLiteral)) {
@@ -103,85 +110,64 @@ function toExpression(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
 
 const cache = new Map<string, Generator<ParseResult>>();
 
-export function createExpression<
-  T extends ExpressionInternal = ExpressionInternal
->(expr: Omit<T, "id">): T {
+export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
+  expr: Omit<T, "id">
+): T {
   const id = nanoid(10);
   return {
     ...expr,
     id,
     *_translate(str, state, context): Generator<ParseResult> {
-      if (state.index > str.length)
-        throw new Error(`Failed to parse string ${str} at ${state.index}.`);
-
-      function resolveNexts(
-        nexts: ExpressionInternal["nexts"]
-      ): (ExpressionInternal | undefined)[] {
-        return (nexts || [context.next]).flatMap((next) =>
-          next && isEmptyExpression(next) ? resolveNexts(next?.nexts) : [next]
-        );
+      if (state.index > str.length) {
+        return {
+          value: undefined,
+          state,
+          error: new Error(`Failed to parse string ${str} at ${state.index}.`),
+        };
       }
-      const nexts = resolveNexts(this.nexts);
-      // const nexts = this.nexts || [context.next];
+
+      const next = this.next || context.next;
       console.log();
-      console.log(
-        "nexts:",
-        nexts.map((x) => x?.__debug_info)
-      );
+      console.log("next:", next?.__debug_info);
 
-      let i = 0,
-        error: unknown;
-      while (i < nexts.length) {
-        const next = nexts[i];
+      const nextId = next === undefined ? "" : next.id;
+      const cacheKey = `${id}-${state.index}-${nextId}`;
+      const cached = cacheKey === null ? null : cache.get(cacheKey);
 
-        const nextId = next === undefined ? "" : next.id;
-        const cacheKey = `${id}-${state.index}-${nextId}`;
-        const cached = cacheKey === null ? null : cache.get(cacheKey);
+      if (cached) {
+        yield* cached;
+      } else {
+        console.log(
+          `${
+            state.index === str.length
+              ? `${chalk.dim(str)}`
+              : `${str.slice(0, state.index)}${
+                  str[state.index] === undefined
+                    ? ""
+                    : chalk.bold(chalk.blue(chalk.underline(str[state.index])))
+                }${str.slice(state.index + 1)}`
+          }(${str.length})`,
+          "with",
+          expr.__debug_info,
+          "at",
+          state
+        );
 
-        if (cached) {
-          yield* cached;
-        } else {
-          console.log(
-            `${
-              state.index === str.length
-                ? `${chalk.dim(str)}`
-                : `${str.slice(0, state.index)}${
-                    str[state.index] === undefined
-                      ? ""
-                      : chalk.bold(
-                          chalk.blue(chalk.underline(str[state.index]))
-                        )
-                  }${str.slice(state.index + 1)}`
-            }(${str.length})`,
-            "with",
-            expr.__debug_info,
-            "at",
-            state
-          );
+        const result = expr._translate(
+          str,
+          {
+            index: state.index,
+          },
+          { next }
+        );
 
-          try {
-            const result = expr._translate(
-              str,
-              {
-                index: state.index,
-              },
-              { next }
-            );
+        // 実行済みのgeneratorをキャッシュしても意味ない
+        // if (cacheKey !== null) {
+        //   cache.set(cacheKey, result);
+        // }
 
-            // if (cacheKey !== null) {
-            //   cache.set(cacheKey, result);
-            // }
-
-            yield* result;
-          } catch (e) {
-            error = e;
-          }
-        }
-
-        i = (i + 1) | 0;
+        yield* result;
       }
-
-      if (error) throw error;
     },
   } as T;
 }
@@ -190,7 +176,7 @@ function normalizeSeqExpr(
   stringLiterals: TemplateStringsArray,
   placeholders: ExpressionOrLiteral[]
 ) {
-  const exprs: ExpressionInternal[] = [];
+  const exprs: ExpressionLeaf[] = [];
   let i = 0,
     lastIsString = false;
 
@@ -213,7 +199,7 @@ function normalizeSeqExpr(
         exprs[exprs.length - 1] as StringLiteralExpression
       ).concat(placeholder);
     } else {
-      exprs.push(toExpression(placeholder));
+      exprs.push(normalizeExpressionLiteral(placeholder));
     }
     lastIsString = placeholderIsString;
 
@@ -235,24 +221,7 @@ function normalizeSeqExpr(
   while (i < exprs.length) {
     const expr = exprs[i];
     const next = exprs[i + 1];
-    function setNexts(
-      expr: ExpressionInternal,
-      next: ExpressionInternal | undefined
-    ) {
-      if (isOrExpression(expr)) {
-        setNexts(expr.a, next);
-        setNexts(expr.b, next);
-      } else {
-        expr.nexts =
-          next === undefined
-            ? undefined
-            : isOrExpression(next)
-            ? [next.a, next.b]
-            : [next];
-      }
-    }
-
-    setNexts(expr, next);
+    expr.next = next;
 
     i = (i + 1) | 0;
   }
@@ -260,7 +229,7 @@ function normalizeSeqExpr(
   return exprs;
 }
 
-type SeqExpression = ExpressionInternal & {
+type SeqExpression = ExpressionLeaf & {
   type: "seq";
 };
 export function seq(
@@ -325,40 +294,49 @@ export function seq(
       ): Generator<ParseResult> {
         if (i < exprs.length) {
           const expr = exprs[i];
-          for (const { state: itemState, value: itemValue } of expr._translate(
-            str,
-            state,
-            context
-          )) {
-            if (isFlatExpression(expr) && Array.isArray(itemValue)) {
-              yield* results(value.concat(itemValue), itemState, i + 1);
-            } else if (isObjectExpression(expr)) {
-              const objIndex = value.findIndex((x) => typeof x === "object");
-              if (objIndex === -1) {
+          for (const {
+            state: itemState,
+            value: itemValue,
+            error,
+          } of expr._translate(str, state, context)) {
+            if (error) {
+              yield {
+                value,
+                state,
+                error,
+              };
+            } else {
+              if (isFlatExpression(expr) && Array.isArray(itemValue)) {
                 yield* results(value.concat(itemValue), itemState, i + 1);
+              } else if (isObjectExpression(expr)) {
+                const objIndex = value.findIndex((x) => typeof x === "object");
+                if (objIndex === -1) {
+                  yield* results(value.concat(itemValue), itemState, i + 1);
+                } else {
+                  value[objIndex] = {
+                    ...(value[objIndex] as any),
+                    ...(itemValue as any),
+                  };
+                  yield* results(
+                    Object.assign(value, itemValue),
+                    itemState,
+                    i + 1
+                  );
+                }
               } else {
-                value[objIndex] = {
-                  ...(value[objIndex] as any),
-                  ...(itemValue as any),
-                };
                 yield* results(
-                  Object.assign(value, itemValue),
+                  value.concat(itemValue === undefined ? [] : [itemValue]),
                   itemState,
                   i + 1
                 );
               }
-            } else {
-              yield* results(
-                value.concat(itemValue === undefined ? [] : [itemValue]),
-                itemState,
-                i + 1
-              );
             }
           }
         } else if (i === exprs.length) {
           yield {
             value,
             state,
+            error: undefined,
           };
         }
       }
@@ -373,20 +351,20 @@ export function seq(
   });
 }
 
-function isOrExpression(x: any): x is OrExpression {
-  return x["type"] === "or" && isExpression(x);
-}
-type OrExpression = ExpressionInternal & {
+// function isOrExpression(x: any): x is OrExpression {
+//   return x["type"] === "or" && isExpression(x);
+// }
+type OrExpression = ExpressionLeaf & {
   type: "or";
-  a: ExpressionInternal;
-  b: ExpressionInternal;
+  a: ExpressionLeaf;
+  b: ExpressionLeaf;
 };
 export function or(
   aOrLiteral: ExpressionOrLiteral,
   bOrLiteral: ExpressionOrLiteral
 ): OrExpression {
-  const a = toExpression(aOrLiteral),
-    b = toExpression(bOrLiteral);
+  const a = normalizeExpressionLiteral(aOrLiteral),
+    b = normalizeExpressionLiteral(bOrLiteral);
 
   return createExpression({
     type: "or",
@@ -397,11 +375,8 @@ export function or(
       yield* b.getMetadata();
     },
     *_translate(str, state, context) {
-      try {
-        yield* a._translate(str, state, context);
-      } catch (error) {
-        yield* b._translate(str, state, context);
-      }
+      yield* a._translate(str, state, context);
+      yield* b._translate(str, state, context);
     },
     __debug_info: {
       type: "or",
@@ -412,13 +387,13 @@ export function or(
 // function isLazyExpression(x: any): x is LazyExpression {
 //   return x["type"] === "lazy" && isExpression(x);
 // }
-type LazyExpression = ExpressionInternal & {
+type LazyExpression = ExpressionLeaf & {
   type: "lazy";
 };
 export function lazy(
   resolverExprOrLiteral: () => ExpressionOrLiteral
 ): LazyExpression {
-  const resolver = () => toExpression(resolverExprOrLiteral());
+  const resolver = () => normalizeExpressionLiteral(resolverExprOrLiteral());
   return createExpression({
     type: "lazy",
     *getMetadata() {
@@ -436,11 +411,11 @@ export function lazy(
 function isFlatExpression(x: any): x is FlatExpression {
   return x["type"] === "flat" && isExpression(x);
 }
-type FlatExpression = ExpressionInternal & {
+type FlatExpression = ExpressionLeaf & {
   type: "flat";
 };
 export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
-  const expr = toExpression(exprOrLiteral);
+  const expr = normalizeExpressionLiteral(exprOrLiteral);
   return createExpression({
     type: "flat",
     *getMetadata() {
@@ -455,15 +430,15 @@ export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
   });
 }
 
-export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
-  const expr = toExpression(exprOrLiteral);
+export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionLeaf {
+  const expr = normalizeExpressionLiteral(exprOrLiteral);
   return createExpression({
     *getMetadata() {
       yield* expr.getMetadata();
     },
     *_translate(str, state, context) {
       for (const result of expr._translate(str, state, context)) {
-        const { state: newState, value } = result;
+        const { state: newState, value, error } = result;
 
         if (Array.isArray(value)) {
           const newValue = (value as unknown[]).reduce((res, item) => {
@@ -480,11 +455,13 @@ export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionInternal {
           yield {
             value: newValue,
             state: newState,
+            error,
           };
         } else {
           yield {
             state: newState,
             value,
+            error,
           };
         }
       }
@@ -506,10 +483,10 @@ export function repeat(expr: ExpressionOrLiteral): FlatExpression {
   );
 }
 
-function isEmptyExpression(x: any): x is EmptyExpression {
-  return x.type === "empty" && isExpression(x);
-}
-type EmptyExpression = ExpressionInternal & { type: "empty" };
+// function isEmptyExpression(x: any): x is EmptyExpression {
+//   return x.type === "empty" && isExpression(x);
+// }
+type EmptyExpression = ExpressionLeaf & { type: "empty" };
 export function empty<T>(value: T): EmptyExpression {
   return createExpression({
     type: "empty",
@@ -523,6 +500,7 @@ export function empty<T>(value: T): EmptyExpression {
       yield {
         state,
         value,
+        error: undefined,
       };
     },
     __debug_info: {
@@ -544,21 +522,24 @@ export function end() {
         yield {
           value: undefined,
           state,
+          error: undefined,
+        };
+      } else {
+        yield {
+          value: undefined,
+          state,
+          error: new Error(`${state.index} does not end at ${str.length}.`),
         };
       }
-
-      throw new Error(`${state.index} does not end at ${str.length}.`);
     },
   });
 }
 
-export function any(
-  childExprOrLiteral?: ExpressionOrLiteral
-): ExpressionInternal {
+export function any(childExprOrLiteral?: ExpressionOrLiteral): ExpressionLeaf {
   const childExpr =
     childExprOrLiteral === undefined
       ? undefined
-      : toExpression(childExprOrLiteral);
+      : normalizeExpressionLiteral(childExprOrLiteral);
   return createExpression({
     *getMetadata() {
       yield {
@@ -581,6 +562,7 @@ export function any(
               state: {
                 index: state.index + res.state.index,
               },
+              error: res.error,
             };
           }
         } else {
@@ -589,6 +571,7 @@ export function any(
               index: state.index + value.length,
             },
             value,
+            error: undefined,
           };
         }
       }
@@ -651,9 +634,14 @@ export function exists(target: string) {
             index: state.index + target.length,
           },
           value: true,
+          error: undefined,
         };
       } else {
-        throw new Error(`${target} does not exists at ${state.index}.`);
+        yield {
+          state,
+          value: undefined,
+          error: new Error(`${target} does not exists at ${state.index}.`),
+        };
       }
     },
     __debug_info: {
@@ -663,7 +651,7 @@ export function exists(target: string) {
   });
 }
 
-type StringLiteralExpression = ExpressionInternal & {
+type StringLiteralExpression = ExpressionLeaf & {
   type: "stringLiteral";
   concat(str: string): StringLiteralExpression;
 };
@@ -688,11 +676,16 @@ export function stringLiteralExpr(expected: string): StringLiteralExpression {
             index: newIndex,
           },
           value: undefined,
+          error: undefined,
         };
       } else {
-        throw new Error(
-          `string '${expected}' does not match '${actual}' at ${state.index}.`
-        );
+        yield {
+          state,
+          value: undefined,
+          error: new Error(
+            `string '${expected}' does not match '${actual}' at ${state.index}.`
+          ),
+        };
       }
     },
     __debug_info: {
@@ -732,11 +725,18 @@ export function regexp(
           state: {
             index: state.index + value.length,
           },
+          error: undefined,
         };
       } else {
-        throw new Error(
-          `RegExp ${regexp.toString()} does not match string at ${state.index}`
-        );
+        yield {
+          value: undefined,
+          state,
+          error: new Error(
+            `RegExp ${regexp.toString()} does not match string at ${
+              state.index
+            }`
+          ),
+        };
       }
     },
     __debug_info: {
@@ -752,7 +752,7 @@ export function integer() {
   });
 }
 
-export function fn(fn: (str: string) => unknown): ExpressionInternal {
+export function fn(fn: (str: string) => unknown): ExpressionLeaf {
   return createExpression({
     *getMetadata() {
       yield {
@@ -761,12 +761,22 @@ export function fn(fn: (str: string) => unknown): ExpressionInternal {
       };
     },
     *_translate(str, state) {
-      yield {
-        value: fn(str.slice(state.index)),
-        state: {
-          index: str.length,
-        },
-      };
+      try {
+        const value = fn(str.slice(state.index));
+        yield {
+          value,
+          state: {
+            index: str.length,
+          },
+          error: undefined,
+        };
+      } catch (error) {
+        yield {
+          value: undefined,
+          state,
+          error: error as Error,
+        };
+      }
     },
     __debug_info: {
       type: "function",
@@ -777,14 +787,14 @@ export function fn(fn: (str: string) => unknown): ExpressionInternal {
 function isObjectExpression(x: any): x is ObjectExpression {
   return x.type === "obj" && isExpression(x);
 }
-type ObjectExpression = ExpressionInternal & {
+type ObjectExpression = ExpressionLeaf & {
   type: "obj";
 };
 export function obj(obj: {
   [prop: string]: ExpressionOrLiteral;
 }): ObjectExpression {
   const firstKey = Object.keys(obj)[0];
-  const expr = toExpression(obj[firstKey]);
+  const expr = normalizeExpressionLiteral(obj[firstKey]);
 
   return createExpression({
     type: "obj",
@@ -793,13 +803,14 @@ export function obj(obj: {
     },
     *_translate(str, state, context) {
       for (const result of expr._translate(str, state, context)) {
-        const { state: newState, value } = result;
+        const { state: newState, value, error } = result;
 
         yield {
           state: newState,
           value: {
             [firstKey]: value,
           },
+          error,
         };
       }
     },

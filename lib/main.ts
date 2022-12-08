@@ -441,22 +441,28 @@ export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionLeaf {
         const { state: newState, value, error } = result;
 
         if (Array.isArray(value)) {
-          const newValue = (value as unknown[]).reduce((res, item) => {
-            if (typeof item === "object" && item) {
-              return {
-                ...(res as any),
-                ...item,
-              };
-            } else {
-              return res;
-            }
-          }, {});
-
-          yield {
-            value: newValue,
-            state: newState,
-            error,
-          };
+          if (value.some((x) => typeof x === "object")) {
+            yield {
+              value: (value as unknown[]).reduce((res, item) => {
+                if (typeof item === "object" && item !== null) {
+                  return {
+                    ...(res as any),
+                    ...item,
+                  };
+                } else {
+                  return res;
+                }
+              }, {}),
+              state: newState,
+              error,
+            };
+          } else {
+            yield {
+              value: value[0],
+              state: newState,
+              error,
+            };
+          }
         } else {
           yield {
             state: newState,

@@ -1,237 +1,569 @@
-const debugSym = Symbol();
-type ExpresisonDebugger = {};
-export function withDebug<TExpression extends Expression>(
-  expr: TExpression,
-  exprDebugger: ExpresisonDebugger = {}
-) {
-  expr[debugSym] = exprDebugger;
+import { nanoid } from "nanoid";
+import chalk from "picocolors";
 
-  return expr;
+type ParseState = {
+  index: number;
+};
+type ParseContext = {
+  next: ExpressionLeaf | undefined;
+};
+type Head = RegExp | string | undefined;
+type ParseResult = {
+  state: ParseState;
+  value: unknown;
+  error: Error | undefined;
+};
+type MinLength = number;
+type ExprMetadata = {
+  head: Head;
+  minLength: MinLength;
+};
+type ExpressionLeaf = {
+  id: string;
+  nexts?: ExpressionLeaf[];
+  getMetadata(): Generator<ExprMetadata>;
+
+  _translate(
+    str: string,
+    state: ParseState,
+    context: ParseContext
+  ): Generator<ParseResult>;
+
+  __debug_info?: unknown;
+};
+function isExpression(x: any): x is ExpressionLeaf {
+  return typeof x["_translate"] === "function";
 }
-
-export type Expression = (
+export type Expression = ExpressionOrLiteral;
+type ExpressionOrLiteral =
   | string
-  | RegExp
+  | {
+      [prop: string | number | symbol]: ExpressionOrLiteral;
+    }
   | ((str: string) => unknown)
-  | PrimitiveExpression
-  | SeqExpression
-  | OrExpression
-  | LazyExpression
-  | FlatExpression
-  | ReduceExpression
-  | ObjectExpression
-) & {
-  [debugSym]?: ExpresisonDebugger;
-};
-// TODO
-// | IgnoreExpression;
+  | RegExp
+  | ExpressionLeaf;
 
-const emptyHead = Symbol();
-type Head = string | undefined | typeof emptyHead;
-type CanGetHeads = {
-  getHeads: (index: number) => Head[];
-};
+export function translate(str: string, expr: ExpressionOrLiteral) {
+  console.log();
+  console.log(chalk.blue("translation start."));
+  console.log();
 
-function isCanGetHeads(x: any): x is CanGetHeads {
-  return (
-    isSeqExpression(x) ||
-    isFlattendExpression(x) ||
-    isReducedExpression(x) ||
-    isLazyExpression(x) ||
-    isOrExpression(x) ||
-    isPrimitiveExpression(x)
+  const tree = normalizeExpressionLiteral(
+    seq`${flat(expr)}${end()}`
+  )._translate(
+    str,
+    {
+      index: 0,
+    },
+    {
+      next: undefined,
+    }
   );
+
+  let error: unknown,
+    result: ParseResult | undefined = undefined;
+  do {
+    const { done, value } = tree.next();
+    if (done) break;
+
+    console.log();
+    console.log(
+      "translation end: ",
+      value.value,
+      value.state,
+      value.error?.message
+    );
+    console.log();
+    if (value.error) {
+      error = value.error;
+    } else {
+      result = value;
+      break;
+    }
+  } while (true);
+
+  if (result) {
+    console.log();
+    console.log(chalk.green("translation end successfully."));
+    console.log();
+
+    return result;
+  } else {
+    console.log();
+    console.log(chalk.red("failed to translate."));
+    console.log();
+
+    throw error || new Error("No translation executed.");
+  }
 }
 
-type CanDetectOptional = {
-  isOptionalExpr: () => boolean;
-};
-
-function isCanDetectOptional(x: any): x is CanDetectOptional {
-  return (
-    isSeqExpression(x) ||
-    isFlattendExpression(x) ||
-    isReducedExpression(x) ||
-    isLazyExpression(x) ||
-    isOrExpression(x)
-  );
+function normalizeExpressionLiteral(
+  exprOrLiteral: ExpressionOrLiteral
+): ExpressionLeaf {
+  if (typeof exprOrLiteral === "string") {
+    return stringLiteralExpr(exprOrLiteral);
+  } else if (isExpression(exprOrLiteral)) {
+    // for preventing share .next references.
+    return { ...exprOrLiteral };
+  } else if (exprOrLiteral instanceof RegExp) {
+    return regexp(exprOrLiteral);
+  } else if (typeof exprOrLiteral === "function") {
+    return fn(exprOrLiteral);
+  } else {
+    return obj(exprOrLiteral);
+  }
 }
 
-function resolveHeads(x: Expression | undefined, index: number): Head[] {
-  if (x === undefined) return [undefined];
-  if (isCanGetHeads(x)) return x.getHeads(index);
-  if (typeof x === "string") return [x];
-  if (isObjectExpression(x)) {
-    return resolveHeads((x as any)[Object.keys(x)[0]], index);
+const cache = new Map<string, Generator<ParseResult>>();
+
+export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
+  expr: Omit<T, "id">
+): T {
+  const id = nanoid(10);
+  return {
+    ...expr,
+    id,
+    *_translate(str, state, context): Generator<ParseResult> {
+      console.log();
+      console.log();
+      if (state.index > str.length) {
+        return {
+          value: undefined,
+          state,
+          error: new Error(`Failed to parse string ${str} at ${state.index}.`),
+        };
+      }
+
+      function resolveNexts(
+        nexts: ExpressionLeaf["nexts"],
+        context: ParseContext
+      ): (ExpressionLeaf | undefined)[] {
+        return (
+          nexts?.flatMap((next) => {
+            if (isEmptyExpression(next)) {
+              return resolveNexts(next.nexts, context);
+            } else if (isOrExpression(next)) {
+              return resolveNexts(next.nexts, context).flatMap((nextsNext) =>
+                resolveNexts([next.a, next.b], { next: nextsNext })
+              );
+            } else if (isObjectExpression(next)) {
+              return resolveNexts(next.nexts, context).flatMap((nextsNext) =>
+                resolveNexts([next.expr], { next: nextsNext })
+              );
+            } else {
+              return [next];
+            }
+          }) || [context.next]
+        );
+      }
+
+      const nexts = resolveNexts(this.nexts, context);
+
+      console.log(
+        "this.nexts:",
+        this.nexts?.map((x) => x.__debug_info)
+      );
+      console.log(
+        chalk.bgYellow("next:"),
+        nexts.map((x) => x?.__debug_info)
+      );
+
+      for (const next of nexts) {
+        const childContext: ParseContext = {
+          next,
+        };
+
+        const nextId = next === undefined ? "" : next.id;
+        const cacheKey = `${id}-${state.index}-${nextId}`;
+        const cached = cacheKey === null ? null : cache.get(cacheKey);
+
+        if (cached) {
+          yield* cached;
+        } else {
+          console.log(
+            `${
+              state.index === str.length
+                ? `${chalk.dim(str)}`
+                : `${str.slice(0, state.index)}${
+                    str[state.index] === undefined
+                      ? ""
+                      : chalk.white(chalk.bgBlue(str[state.index]))
+                  }${str.slice(state.index + 1)}`
+            }(${str.length})`,
+            "with",
+            expr.__debug_info,
+            "at",
+            state
+          );
+
+          const result = expr._translate(
+            str,
+            {
+              index: state.index,
+            },
+            childContext
+          );
+
+          // 実行済みのgeneratorをキャッシュしても意味ない
+          // if (cacheKey !== null) {
+          //   cache.set(cacheKey, result);
+          // }
+
+          yield* result;
+          // for (const res of result) {
+          //   if (res.error) {
+          //     yield res;
+          //   } else {
+          //     if (next === undefined) {
+          //       yield res;
+          //     } else {
+          //       for (const nextRes of next._translate(
+          //         str,
+          //         res.state,
+          //         childContext
+          //       )) {
+          //         if (nextRes.error) {
+          //           yield {
+          //             error: nextRes.error,
+          //             state: nextRes.state,
+          //             value: res.value,
+          //           };
+          //         } else {
+          //           if (isFlatExpression(next) && Array.isArray(nextRes.value)) {
+          //             yield {
+          //               error: undefined,
+          //               state: nextRes.state,
+          //               value: [res.value, ...nextRes.value],
+          //             };
+          //           } else {
+          //             yield {
+          //               error: undefined,
+          //               state: nextRes.state,
+          //               value: [res.value, nextRes.value],
+          //             };
+          //           }
+          //         }
+          //       }
+          //     }
+          //   }
+          // }
+        }
+      }
+    },
+  } as T;
+}
+
+function normalizeSeqExpr(
+  stringLiterals: TemplateStringsArray,
+  placeholders: ExpressionOrLiteral[]
+) {
+  const exprs: ExpressionLeaf[] = [];
+  let i = 0,
+    lastIsString = false;
+
+  while (i < placeholders.length) {
+    const stringLiteral = stringLiterals[i];
+    if (stringLiteral !== "") {
+      if (lastIsString) {
+        exprs[exprs.length - 1] = (
+          exprs[exprs.length - 1] as StringLiteralExpression
+        ).concat(stringLiteral);
+      } else {
+        exprs.push(stringLiteralExpr(stringLiteral));
+      }
+      lastIsString = typeof stringLiteral === "string";
+    }
+    const placeholder = placeholders[i];
+    const placeholderIsString = typeof placeholder === "string";
+    if (lastIsString && placeholderIsString) {
+      exprs[exprs.length - 1] = (
+        exprs[exprs.length - 1] as StringLiteralExpression
+      ).concat(placeholder);
+    } else {
+      exprs.push(normalizeExpressionLiteral(placeholder));
+    }
+    lastIsString = placeholderIsString;
+
+    i = (i + 1) | 0;
   }
 
-  return [undefined];
+  const lastStringLiteral = stringLiterals[i];
+  if (lastStringLiteral !== "") {
+    if (lastIsString) {
+      exprs[exprs.length - 1] = (
+        exprs[exprs.length - 1] as StringLiteralExpression
+      ).concat(stringLiterals[i]);
+    } else {
+      exprs.push(stringLiteralExpr(stringLiterals[i]));
+    }
+  }
+
+  i = 0;
+
+  while (i < exprs.length) {
+    // skip empty expression.
+    const next = exprs.find((expr, j) => j > i && !isEmptyExpression(expr));
+    exprs[i].nexts = next === undefined ? next : [next];
+    console.log(i, ".next", exprs[i + 1]?.__debug_info);
+
+    i = (i + 1) | 0;
+  }
+
+  return exprs;
 }
 
-type ObjectExpression = {
-  [p: string]: Expression;
+type SeqExpression = ExpressionLeaf & {
+  type: "seq";
 };
-function isObjectExpression(x: any): x is ObjectExpression {
-  return (
-    x !== null &&
-    typeof x === "object" &&
-    !isSeqExpression(x) &&
-    !isFlattendExpression(x) &&
-    !isReducedExpression(x) &&
-    !isLazyExpression(x) &&
-    !isOrExpression(x) &&
-    !isPrimitiveExpression(x)
-  );
-}
-
-const seqExpr = Symbol();
-export type SeqExpression = {
-  [seqExpr]: true;
-  exprs: Expression[];
-} & CanGetHeads &
-  CanDetectOptional;
-function isSeqExpression(x: any): x is SeqExpression {
-  return x[seqExpr];
-}
 export function seq(
   strings: TemplateStringsArray,
-  ...exprs: Expression[]
+  ...placeholders: ExpressionOrLiteral[]
 ): SeqExpression {
-  const arr = [
-    strings[0],
-    ...Array(exprs.length)
-      .fill(null)
-      .flatMap((_, i) => [exprs[i], strings[i + 1]]),
-  ].reduce((res, item) => {
-    if (item === "") return res;
+  const exprs = normalizeSeqExpr(strings, placeholders);
 
-    if (res.length) {
-      const last = res[res.length - 1];
-      if (typeof last === "string" && typeof item === "string") {
-        res[res.length - 1] = last + item;
-        return res;
+  return createExpression({
+    type: "seq",
+    *getMetadata() {
+      function* genMetadata(
+        info: ExprMetadata,
+        i: number
+      ): Generator<ExprMetadata> {
+        if (i < exprs.length) {
+          const expr = exprs[i];
+          for (const nextInfo of expr.getMetadata()) {
+            const minLength = info.minLength + nextInfo.minLength;
+            if (typeof info.head === "string") {
+              if (typeof info.head === "string") {
+                yield {
+                  head: info.head + nextInfo.head,
+                  minLength,
+                };
+              } else {
+                yield {
+                  head: info.head,
+                  minLength,
+                };
+              }
+            } else if (info.head instanceof RegExp) {
+              yield {
+                head: info.head,
+                minLength,
+              };
+            } else {
+              yield {
+                head: info.head,
+                minLength,
+              };
+            }
+          }
+        } else if (i === exprs.length) {
+          yield info;
+        }
       }
-    }
 
-    res.push(item);
-
-    return res;
-  }, [] as Expression[]);
-
-  const first = arr[0];
-  const second = arr[1];
-
-  return {
-    getHeads(index) {
-      return typeof first === "string"
-        ? [first as Head].concat(resolveHeads(second, index))
-        : resolveHeads(first, index);
-    },
-    isOptionalExpr() {
-      return (
-        arr.length === 1 &&
-        isCanDetectOptional(arr[0]) &&
-        arr[0].isOptionalExpr()
+      yield* genMetadata(
+        {
+          head: "",
+          minLength: 0,
+        },
+        0
       );
     },
-    [seqExpr]: true,
-    exprs: arr,
-  };
+    *_translate(str, state, context) {
+      function* results(
+        value: unknown[],
+        state: ParseState,
+        i: number
+      ): Generator<ParseResult> {
+        if (i < exprs.length) {
+          const expr = exprs[i];
+
+          for (const {
+            state: itemState,
+            value: itemValue,
+            error,
+          } of expr._translate(str, state, context)) {
+            if (error) {
+              yield {
+                value,
+                state,
+                error,
+              };
+            } else {
+              if (isFlatExpression(expr) && Array.isArray(itemValue)) {
+                yield* results(value.concat(itemValue), itemState, i + 1);
+              } else if (isObjectExpression(expr)) {
+                const objIndex = value.findIndex((x) => typeof x === "object");
+                if (objIndex === -1) {
+                  yield* results(value.concat(itemValue), itemState, i + 1);
+                } else {
+                  value[objIndex] = {
+                    ...(value[objIndex] as any),
+                    ...(itemValue as any),
+                  };
+                  yield* results(
+                    Object.assign(value, itemValue),
+                    itemState,
+                    i + 1
+                  );
+                }
+              } else {
+                yield* results(
+                  value.concat(itemValue === undefined ? [] : [itemValue]),
+                  itemState,
+                  i + 1
+                );
+              }
+            }
+          }
+        } else if (i === exprs.length) {
+          yield {
+            value,
+            state,
+            error: undefined,
+          };
+        }
+      }
+
+      yield* results([], state, 0);
+    },
+    __debug_info: {
+      type: "seq",
+      len: exprs.length,
+      // exprs: exprs.map((x) => x.__debug_info),
+    },
+  });
 }
 
-const flatExpr = Symbol();
-export type FlatExpression = {
-  [flatExpr]: true;
-  expr: Expression;
-} & CanGetHeads &
-  CanDetectOptional;
-function isFlattendExpression(x: any): x is FlatExpression {
-  return x[flatExpr];
-}
-export function flat(expr: Expression): FlatExpression {
-  return {
-    [flatExpr]: true,
-    getHeads(index) {
-      return resolveHeads(expr, index);
-    },
-    isOptionalExpr() {
-      return isCanDetectOptional(expr) && expr.isOptionalExpr();
-    },
-    expr,
-  };
-}
-
-const reduceExpr = Symbol();
-export type ReduceExpression = {
-  [reduceExpr]: true;
-  expr: Expression;
-} & CanGetHeads &
-  CanDetectOptional;
-function isReducedExpression(x: any): x is ReduceExpression {
-  return x[reduceExpr];
-}
-export function reduce(expr: Expression): ReduceExpression {
-  return {
-    [reduceExpr]: true,
-    getHeads(index) {
-      return resolveHeads(expr, index);
-    },
-    isOptionalExpr() {
-      return isCanDetectOptional(expr) && expr.isOptionalExpr();
-    },
-    expr,
-  };
-}
-
-const lazyExpr = Symbol();
-export type LazyExpression = {
-  [lazyExpr]: true;
-  resolveExpr: () => Expression;
-} & CanGetHeads &
-  CanDetectOptional;
-function isLazyExpression(x: any): x is LazyExpression {
-  return x[lazyExpr];
-}
-export function lazy(resolveExpr: () => Expression): LazyExpression {
-  return {
-    [lazyExpr]: true,
-    getHeads(index) {
-      return resolveHeads(resolveExpr(), index);
-    },
-    isOptionalExpr() {
-      const expr = resolveExpr();
-      return isCanDetectOptional(expr) && expr.isOptionalExpr();
-    },
-    resolveExpr,
-  };
-}
-
-const orExpr = Symbol();
-export type OrExpression = {
-  [orExpr]: true;
-  e1: Expression;
-  e2: Expression;
-} & CanGetHeads &
-  CanDetectOptional;
 function isOrExpression(x: any): x is OrExpression {
-  return x[orExpr];
+  return x["type"] === "or" && isExpression(x);
 }
-export function or(e1: Expression, e2: Expression): OrExpression {
-  return {
-    [orExpr]: true,
-    isOptionalExpr: () =>
-      isEmptyExpr(e2) ||
-      (isCanDetectOptional(e1) && e1.isOptionalExpr()) ||
-      (isCanDetectOptional(e2) && e2.isOptionalExpr()),
-    getHeads(index) {
-      return resolveHeads(e1, index).concat(resolveHeads(e2, index));
+type OrExpression = ExpressionLeaf & {
+  type: "or";
+  a: ExpressionLeaf;
+  b: ExpressionLeaf;
+};
+export function or(
+  aOrLiteral: ExpressionOrLiteral,
+  bOrLiteral: ExpressionOrLiteral
+): OrExpression {
+  const a = normalizeExpressionLiteral(aOrLiteral),
+    b = normalizeExpressionLiteral(bOrLiteral);
+
+  return createExpression({
+    type: "or",
+    a,
+    b,
+    *getMetadata() {
+      yield* a.getMetadata();
+      yield* b.getMetadata();
     },
-    e1,
-    e2,
-  };
+    *_translate(str, state, context) {
+      yield* a._translate(str, state, context);
+      yield* b._translate(str, state, context);
+    },
+    __debug_info: {
+      type: "or",
+    },
+  });
 }
 
-export function repeat(expr: Expression): Expression {
+// function isLazyExpression(x: any): x is LazyExpression {
+//   return x["type"] === "lazy" && isExpression(x);
+// }
+type LazyExpression = ExpressionLeaf & {
+  type: "lazy";
+};
+export function lazy(
+  resolverExprOrLiteral: () => ExpressionOrLiteral
+): LazyExpression {
+  const resolver = () => normalizeExpressionLiteral(resolverExprOrLiteral());
+  return createExpression({
+    type: "lazy",
+    *getMetadata() {
+      yield* resolver().getMetadata();
+    },
+    _translate(str, state, context) {
+      return resolver()._translate(str, state, context);
+    },
+    __debug_info: {
+      type: "lazy",
+    },
+  });
+}
+
+function isFlatExpression(x: any): x is FlatExpression {
+  return x["type"] === "flat" && isExpression(x);
+}
+type FlatExpression = ExpressionLeaf & {
+  type: "flat";
+};
+export function flat(exprOrLiteral: ExpressionOrLiteral): FlatExpression {
+  const expr = normalizeExpressionLiteral(exprOrLiteral);
+  return createExpression({
+    type: "flat",
+    *getMetadata() {
+      yield* expr.getMetadata();
+    },
+    *_translate(str, state, context) {
+      yield* expr._translate(str, state, context);
+    },
+    __debug_info: {
+      type: "flat",
+    },
+  });
+}
+
+export function reduce(exprOrLiteral: ExpressionOrLiteral): ExpressionLeaf {
+  const expr = normalizeExpressionLiteral(exprOrLiteral);
+  return createExpression({
+    *getMetadata() {
+      yield* expr.getMetadata();
+    },
+    *_translate(str, state, context) {
+      for (const result of expr._translate(str, state, context)) {
+        const { state: newState, value, error } = result;
+
+        if (Array.isArray(value)) {
+          if (value.some((x) => typeof x === "object")) {
+            yield {
+              value: (value as unknown[]).reduce((res, item) => {
+                if (typeof item === "object" && item !== null) {
+                  return {
+                    ...(res as any),
+                    ...item,
+                  };
+                } else {
+                  return res;
+                }
+              }, {}),
+              state: newState,
+              error,
+            };
+          } else {
+            yield {
+              value: value[0],
+              state: newState,
+              error,
+            };
+          }
+        } else {
+          yield {
+            state: newState,
+            value,
+            error,
+          };
+        }
+      }
+    },
+    __debug_info: {
+      type: "reduce",
+    },
+  });
+}
+
+export function repeat(expr: ExpressionOrLiteral): FlatExpression {
   return flat(
     seq`${flat(expr)}${flat(
       or(
@@ -242,7 +574,351 @@ export function repeat(expr: Expression): Expression {
   );
 }
 
-export function split(delimiter: string, expr?: Expression) {
+function isEmptyExpression(x: any): x is EmptyExpression {
+  return x.type === "empty" && isExpression(x);
+}
+type EmptyExpression = ExpressionLeaf & { type: "empty" };
+export function empty<T>(value: T): EmptyExpression {
+  return createExpression({
+    type: "empty",
+    *getMetadata() {
+      yield {
+        head: undefined,
+        minLength: 0,
+      };
+    },
+    *_translate(_str, state) {
+      yield {
+        state,
+        value,
+        error: undefined,
+      };
+    },
+    __debug_info: {
+      type: "empty",
+    },
+  });
+}
+
+export function end() {
+  return createExpression({
+    *getMetadata() {
+      yield {
+        head: undefined,
+        minLength: 0,
+      };
+    },
+    *_translate(str, state) {
+      if (str.length === state.index) {
+        yield {
+          value: undefined,
+          state,
+          error: undefined,
+        };
+      } else {
+        yield {
+          value: undefined,
+          state,
+          error: new Error(`${state.index} does not end at ${str.length}.`),
+        };
+      }
+    },
+    __debug_info: {
+      type: "end",
+    },
+  });
+}
+
+export function any(childExprOrLiteral?: ExpressionOrLiteral): ExpressionLeaf {
+  const childExpr =
+    childExprOrLiteral === undefined
+      ? undefined
+      : normalizeExpressionLiteral(childExprOrLiteral);
+  return createExpression({
+    *getMetadata() {
+      yield {
+        head: undefined,
+        minLength: 0,
+      };
+    },
+    *_translate(str, state, context) {
+      function* handleValue(value: string) {
+        if (childExpr) {
+          for (const res of childExpr._translate(
+            value,
+            { index: 0 },
+            {
+              next: undefined,
+            }
+          )) {
+            yield {
+              value: res.value,
+              state: {
+                index: state.index + res.state.index,
+              },
+              error: res.error,
+            };
+          }
+        } else {
+          yield {
+            state: {
+              index: state.index + value.length,
+            },
+            value,
+            error: undefined,
+          };
+        }
+      }
+
+      const infos: Iterable<ExprMetadata> =
+        context.next === undefined
+          ? [
+              {
+                head: undefined,
+                minLength: 0,
+              },
+            ]
+          : context.next.getMetadata();
+
+      for (const info of infos) {
+        console.log(chalk.bgGreen("head:"), info.head, "with any at", state);
+        if (info.head instanceof RegExp) {
+          info.head.lastIndex = state.index;
+          const match = info.head.exec(str);
+          if (match) {
+            const value = str.slice(state.index, match.index);
+
+            yield* handleValue(value);
+          } else {
+            yield* handleValue(str.slice(state.index));
+          }
+        } else if (info.head) {
+          const index = str.indexOf(info.head, state.index);
+          console.log(index);
+          if (index === -1) {
+            yield* handleValue(str.slice(state.index));
+          } else {
+            yield* handleValue(str.slice(state.index, index));
+          }
+        } else {
+          yield* handleValue(str.slice(state.index));
+        }
+      }
+    },
+    __debug_info: {
+      type: "any",
+    },
+  });
+}
+
+export function exists(target: string) {
+  return createExpression({
+    *getMetadata() {
+      yield {
+        head: target,
+        minLength: target.length,
+      };
+    },
+    *_translate(str, state) {
+      const sliced = str.slice(state.index, state.index + target.length);
+
+      if (sliced === target) {
+        yield {
+          state: {
+            index: state.index + target.length,
+          },
+          value: true,
+          error: undefined,
+        };
+      } else {
+        yield {
+          state,
+          value: undefined,
+          error: new Error(`${target} does not exists at ${state.index}.`),
+        };
+      }
+    },
+    __debug_info: {
+      type: "exists",
+      target,
+    },
+  });
+}
+
+type StringLiteralExpression = ExpressionLeaf & {
+  type: "stringLiteral";
+  concat(str: string): StringLiteralExpression;
+};
+export function stringLiteralExpr(expected: string): StringLiteralExpression {
+  return createExpression({
+    type: "stringLiteral",
+    concat(str) {
+      return stringLiteralExpr(expected + str);
+    },
+    *getMetadata() {
+      yield {
+        head: expected,
+        minLength: expected.length,
+      };
+    },
+    *_translate(str, state) {
+      const newIndex = state.index + expected.length;
+      const actual = str.slice(state.index, newIndex);
+      if (actual === expected) {
+        yield {
+          state: {
+            index: newIndex,
+          },
+          value: undefined,
+          error: undefined,
+        };
+      } else {
+        yield {
+          state,
+          value: undefined,
+          error: new Error(
+            `string '${expected}' does not match '${actual}' at ${state.index}.`
+          ),
+        };
+      }
+    },
+    __debug_info: {
+      type: "stringLiteral",
+      expected,
+    },
+  });
+}
+
+export function regexp(
+  regexpNotSticky: RegExp,
+  {
+    minLength,
+  }: {
+    minLength: MinLength;
+  } = {
+    minLength: 0,
+  }
+) {
+  const regexp = new RegExp(regexpNotSticky, "y");
+
+  return createExpression({
+    *getMetadata() {
+      yield {
+        head: regexp,
+        minLength,
+      };
+    },
+    *_translate(str, state) {
+      regexp.lastIndex = state.index;
+      const match = regexp.exec(str);
+
+      if (match && match.index === state.index) {
+        const value = match[0];
+        yield {
+          value,
+          state: {
+            index: state.index + value.length,
+          },
+          error: undefined,
+        };
+      } else {
+        yield {
+          value: undefined,
+          state,
+          error: new Error(
+            `RegExp ${regexp.toString()} does not match string at ${
+              state.index
+            }`
+          ),
+        };
+      }
+    },
+    __debug_info: {
+      type: "regexp",
+      regexp,
+    },
+  });
+}
+
+export function integer() {
+  return regexp(/\d+/, {
+    minLength: 1,
+  });
+}
+
+export function fn(fn: (str: string) => unknown): ExpressionLeaf {
+  return createExpression({
+    *getMetadata() {
+      yield {
+        head: undefined,
+        minLength: 0,
+      };
+    },
+    *_translate(str, state) {
+      try {
+        const value = fn(str.slice(state.index));
+        yield {
+          value,
+          state: {
+            index: str.length,
+          },
+          error: undefined,
+        };
+      } catch (error) {
+        yield {
+          value: undefined,
+          state,
+          error: error as Error,
+        };
+      }
+    },
+    __debug_info: {
+      type: "function",
+    },
+  });
+}
+
+function isObjectExpression(x: any): x is ObjectExpression {
+  return x.type === "obj" && isExpression(x);
+}
+type ObjectExpression = ExpressionLeaf & {
+  type: "obj";
+  firstKey: string;
+  expr: ExpressionLeaf;
+};
+export function obj(obj: {
+  [prop: string]: ExpressionOrLiteral;
+}): ObjectExpression {
+  const firstKey = Object.keys(obj)[0];
+  const expr = normalizeExpressionLiteral(obj[firstKey]);
+
+  return createExpression({
+    type: "obj",
+    firstKey,
+    expr,
+    *getMetadata() {
+      yield* expr.getMetadata();
+    },
+    *_translate(str, state, context) {
+      for (const result of expr._translate(str, state, context)) {
+        const { state: newState, value, error } = result;
+
+        yield {
+          state: newState,
+          value: {
+            [firstKey]: value,
+          },
+          error,
+        };
+      }
+    },
+    __debug_info: {
+      type: "obj",
+    },
+  });
+}
+
+export function split(delimiter: string, expr?: ExpressionOrLiteral) {
   return flat(
     any(
       seq`${any(expr)}${flat(
@@ -250,411 +926,4 @@ export function split(delimiter: string, expr?: Expression) {
       )}`
     )
   );
-}
-
-export function primitive(
-  p: Pick<
-    PrimitiveExpression,
-    Exclude<keyof PrimitiveExpression, typeof primitiveExpr>
-  >
-): PrimitiveExpression {
-  return {
-    [primitiveExpr]: true,
-    ...p,
-  };
-}
-function isPrimitiveExpression(x: any): x is PrimitiveExpression {
-  return x[primitiveExpr];
-}
-const primitiveExpr = Symbol();
-type ParseContext = {
-  next?: Head;
-};
-const emptyExpr = Symbol();
-function isEmptyExpr(x: any) {
-  return !!x[emptyExpr];
-}
-export type PrimitiveExpression = {
-  [emptyExpr]?: boolean;
-  [primitiveExpr]: true;
-  __name: string; // for debug
-  parse(
-    str: string,
-    index?: number,
-    options?: ParseContext
-  ): {
-    value: unknown;
-    index: number;
-  };
-} & CanGetHeads;
-
-export function empty<T>(value: T): PrimitiveExpression {
-  return {
-    [emptyExpr]: true,
-    [primitiveExpr]: true,
-    __name: "empty",
-    getHeads() {
-      return [emptyHead];
-    },
-    parse(_str, index = 0) {
-      return {
-        index,
-        value,
-      };
-    },
-  };
-}
-
-export function end<T>(value: T): PrimitiveExpression {
-  return {
-    [primitiveExpr]: true,
-    __name: "end",
-    getHeads() {
-      return [undefined];
-    },
-    parse(str, index = 0) {
-      if (str.length === index) {
-        return {
-          index,
-          value,
-        };
-      } else throw new Error(`string does not end at ${index}`);
-    },
-  };
-}
-
-export function any(childExpr?: Expression): PrimitiveExpression {
-  return {
-    [primitiveExpr]: true,
-    __name: "any",
-    getHeads() {
-      return [undefined];
-    },
-    parse(str, index?, options?) {
-      function read() {
-        const next = options?.next;
-
-        if (next !== emptyHead && next) {
-          const found = str.indexOf(next, index);
-
-          if (found === -1) {
-            return {
-              index: str.length,
-              value: str.slice(index),
-            };
-          } else {
-            return {
-              index: found,
-              value: str.slice(index, found),
-            };
-          }
-        } else {
-          return {
-            index: str.length,
-            value: str.slice(index),
-          };
-        }
-      }
-
-      const { index: newIndex, value } = read();
-
-      return {
-        index: newIndex,
-        value: childExpr ? translate(value, childExpr).value : value,
-      };
-    },
-  };
-}
-
-export function exists(target: string): PrimitiveExpression {
-  return {
-    [primitiveExpr]: true,
-    __name: "exists",
-    getHeads() {
-      return [target];
-    },
-    parse(str, index = 0) {
-      for (let i = 0, imax = target.length; i < imax; i++) {
-        const char = target[i];
-        if (str[index + i] !== char) {
-          throw new Error(`${target} not exists at ${index}.`);
-        }
-      }
-
-      return {
-        index: index + target.length,
-        value: true,
-      };
-    },
-  };
-}
-
-export function integer(): PrimitiveExpression {
-  return {
-    [primitiveExpr]: true,
-    __name: "integer",
-    getHeads() {
-      return [undefined];
-    },
-    parse(str, index = 0) {
-      let value = "";
-      while (true) {
-        const code = str.charCodeAt(index);
-
-        if (code >= 48 && code <= 57) {
-          value += str[index];
-
-          index++;
-        } else break;
-      }
-
-      return {
-        index,
-        value,
-      };
-    },
-  };
-}
-
-type TranslationResult = {
-  value: unknown;
-  index: number;
-};
-
-export function translate(str: string, expr: Expression): TranslationResult {
-  function translateExpr(
-    expr: Expression,
-    index = 0,
-    context: ParseContext = {}
-  ): TranslationResult {
-    if (expr[debugSym]) {
-      console.log("index", index);
-      console.log("context", context);
-    }
-
-    if (typeof expr === "string") {
-      for (let i = 0; i < expr.length; i++) {
-        if (str[index] !== expr[i]) {
-          throw new Error(
-            `'${str[index]}' at ${index} does not match string '${expr}'`
-          );
-        }
-
-        index++;
-      }
-
-      return {
-        value: undefined,
-        index,
-      };
-    } else if (expr instanceof RegExp) {
-      const matched = expr.exec(str.slice(index));
-
-      if (matched === null || matched.index !== 0) {
-        throw new Error(`Regexp ${expr} does not match string at ${index}.`);
-      }
-
-      const matchedStr = matched[0];
-
-      return {
-        value: matchedStr,
-        index: index + matchedStr.length,
-      };
-    } else if (typeof expr === "function") {
-      return {
-        value: expr(str.slice(index)),
-        index: str.length,
-      };
-    } else if (isSeqExpression(expr)) {
-      const value = expr.exprs.reduce((res, expr, i, arr) => {
-        function getNexts(nextIndex: number): Head[] {
-          if (nextIndex >= arr.length) {
-            return [context.next];
-          } else {
-            const nextExpr = arr[nextIndex];
-            return resolveHeads(nextExpr, index).flatMap((head) =>
-              head === emptyHead ? getNexts(nextIndex + 1) : [head]
-            );
-          }
-        }
-
-        const results = getNexts(i + 1).map((next) => {
-          try {
-            if (typeof expr === "string") {
-              const { index: newIndex } = translateExpr(expr, index, {
-                next,
-              });
-
-              return {
-                type: "success" as const,
-                newIndex,
-                applyValue() {},
-              };
-            } else if (isFlattendExpression(expr)) {
-              const { value, index: newIndex } = translateExpr(expr, index, {
-                next,
-              });
-
-              return {
-                type: "success" as const,
-                newIndex,
-                applyValue() {
-                  if (Array.isArray(value)) {
-                    res = res.concat(value);
-                  } else {
-                    res.push(value);
-                  }
-                },
-              };
-            } else if (expr instanceof RegExp) {
-              const { value, index: newIndex } = translateExpr(expr, index, {
-                next,
-              });
-
-              return {
-                type: "success" as const,
-                newIndex,
-                applyValue() {
-                  res.push(value);
-                },
-              };
-            } else {
-              const { value, index: newIndex } = translateExpr(expr, index, {
-                next,
-              });
-
-              return {
-                type: "success" as const,
-                newIndex,
-                applyValue() {
-                  const objectFound = res.findIndex(
-                    (x) => typeof x === "object" && x !== null
-                  );
-
-                  if (objectFound !== -1) {
-                    res[objectFound] = {
-                      ...res[objectFound],
-                      ...(value as object),
-                    };
-                  } else {
-                    res.push(value);
-                  }
-                },
-              };
-            }
-          } catch (error) {
-            return {
-              type: "error" as const,
-              error,
-            };
-          }
-        });
-
-        if (results.length === 0) {
-          throw new Error("no results error");
-        } else {
-          const res = results.reduce((res, x) => {
-            if (
-              x.newIndex !== undefined &&
-              x.newIndex < (res?.newIndex || Infinity)
-            ) {
-              return x;
-            } else {
-              return res;
-            }
-          }, null as typeof results[0] | null);
-
-          if (res === null) {
-            throw results[0].error;
-          } else {
-            if (res.newIndex !== undefined && res.applyValue !== undefined) {
-              index = res.newIndex;
-              res.applyValue && res.applyValue();
-            }
-          }
-        }
-
-        return res;
-      }, [] as any[]);
-
-      return {
-        value,
-        index,
-      };
-    } else if (isOrExpression(expr)) {
-      try {
-        return translateExpr(expr.e1, index, context);
-      } catch (error) {
-        return translateExpr(expr.e2, index, context);
-      }
-    } else if (isLazyExpression(expr)) {
-      return translateExpr(expr.resolveExpr(), index, context);
-    } else if (isFlattendExpression(expr)) {
-      return translateExpr(expr.expr, index, context);
-    } else if (isReducedExpression(expr)) {
-      const { index: newIndex, value } = translateExpr(
-        expr.expr,
-        index,
-        context
-      );
-
-      return {
-        value: Array.isArray(value)
-          ? value.reduce((res, item) => {
-              const objectFound = res.findIndex(
-                (x: any) => typeof x === "object" && x !== null
-              );
-
-              if (objectFound !== -1) {
-                res[objectFound] = {
-                  ...res[objectFound],
-                  ...(item as object),
-                };
-              } else {
-                res.push(item);
-              }
-
-              return res;
-            }, [] as any[])[0]
-          : value,
-        index: newIndex,
-      };
-    } else if (isPrimitiveExpression(expr)) {
-      try {
-        const { index: newIndex, value } = expr.parse(str, index, context);
-        return {
-          value,
-          index: newIndex,
-        };
-      } catch (error) {
-        throw error;
-      }
-    } else {
-      // object
-      const key = Object.keys(expr)[0];
-      const first = expr[key];
-      const { value, index: newIndex } = translateExpr(first, index, context);
-
-      index = newIndex;
-
-      return {
-        value: {
-          [key]: value,
-        },
-        index,
-      };
-    }
-  }
-
-  const { index, value } = translateExpr(expr);
-
-  if (index !== str.length)
-    throw new Error(
-      `string length does not match.expected: ${str.length}.actual: ${index}.`
-    );
-
-  return {
-    index,
-    value,
-  };
 }

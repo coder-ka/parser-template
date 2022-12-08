@@ -7,6 +7,5 @@ const ipAddress = seq`${segment}.${segment}.${segment}.${segment}`;
 
 test("ip address", (t) => {
   const { value } = translate("192.168.1.1", ipAddress);
-
   t.deepEqual(value, ["192", "168", "1", "1"]);
 });

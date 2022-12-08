@@ -1,5 +1,6 @@
 import test from "ava";
 import { any, empty, exists, or, seq, translate } from "../lib/main";
+import { debugTest } from "./util";
 
 const expr = seq`${any()}${or(exists("?"), empty(false))}: ${any()}`;
 

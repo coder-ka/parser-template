@@ -11,9 +11,7 @@ test("exists expr", (t) => {
 });
 
 test("exists expr not exists", (t) => {
-  debugTest(t, () => {
-    const { value } = translate("hoge: string", expr);
+  const { value } = translate("hoge: string", expr);
 
-    t.deepEqual(value, ["hoge", false, "string"]);
-  });
+  t.deepEqual(value, ["hoge", false, "string"]);
 });

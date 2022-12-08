@@ -20,7 +20,7 @@ type ExprMetadata = {
 };
 type ExpressionLeaf = {
   id: string;
-  next?: ExpressionLeaf;
+  nexts?: ExpressionLeaf[];
   getMetadata(): Generator<ExprMetadata>;
 
   _translate(
@@ -125,6 +125,8 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
     ...expr,
     id,
     *_translate(str, state, context): Generator<ParseResult> {
+      console.log();
+      console.log();
       if (state.index > str.length) {
         return {
           value: undefined,
@@ -133,87 +135,116 @@ export function createExpression<T extends ExpressionLeaf = ExpressionLeaf>(
         };
       }
 
-      const next = this.next || context.next;
-      const childContext: ParseContext = {
-        next,
-      };
-      console.log();
-      console.log(chalk.bgYellow("next:"), next?.__debug_info);
-
-      const nextId = next === undefined ? "" : next.id;
-      const cacheKey = `${id}-${state.index}-${nextId}`;
-      const cached = cacheKey === null ? null : cache.get(cacheKey);
-
-      if (cached) {
-        yield* cached;
-      } else {
-        console.log(
-          `${
-            state.index === str.length
-              ? `${chalk.dim(str)}`
-              : `${str.slice(0, state.index)}${
-                  str[state.index] === undefined
-                    ? ""
-                    : chalk.white(chalk.bgBlue(str[state.index]))
-                }${str.slice(state.index + 1)}`
-          }(${str.length})`,
-          "with",
-          expr.__debug_info,
-          "at",
-          state
+      function resolveNexts(
+        nexts: ExpressionLeaf["nexts"],
+        context: ParseContext
+      ): (ExpressionLeaf | undefined)[] {
+        return (
+          nexts?.flatMap((next) => {
+            if (isEmptyExpression(next)) {
+              return resolveNexts(next.nexts, context);
+            } else if (isOrExpression(next)) {
+              return resolveNexts(next.nexts, context).flatMap((nextsNext) =>
+                resolveNexts([next.a, next.b], { next: nextsNext })
+              );
+            } else {
+              return [next];
+            }
+          }) || [context.next]
         );
+      }
 
-        const result = expr._translate(
-          str,
-          {
-            index: state.index,
-          },
-          childContext
-        );
+      const nexts = resolveNexts(this.nexts, context);
 
-        // 実行済みのgeneratorをキャッシュしても意味ない
-        // if (cacheKey !== null) {
-        //   cache.set(cacheKey, result);
-        // }
+      console.log(
+        "this.nexts:",
+        this.nexts?.map((x) => x.__debug_info)
+      );
+      console.log(
+        chalk.bgYellow("next:"),
+        nexts.map((x) => x?.__debug_info)
+      );
 
-        yield* result;
-        // for (const res of result) {
-        //   if (res.error) {
-        //     yield res;
-        //   } else {
-        //     if (next === undefined) {
-        //       yield res;
-        //     } else {
-        //       for (const nextRes of next._translate(
-        //         str,
-        //         res.state,
-        //         childContext
-        //       )) {
-        //         if (nextRes.error) {
-        //           yield {
-        //             error: nextRes.error,
-        //             state: nextRes.state,
-        //             value: res.value,
-        //           };
-        //         } else {
-        //           if (isFlatExpression(next) && Array.isArray(nextRes.value)) {
-        //             yield {
-        //               error: undefined,
-        //               state: nextRes.state,
-        //               value: [res.value, ...nextRes.value],
-        //             };
-        //           } else {
-        //             yield {
-        //               error: undefined,
-        //               state: nextRes.state,
-        //               value: [res.value, nextRes.value],
-        //             };
-        //           }
-        //         }
-        //       }
-        //     }
-        //   }
-        // }
+      for (const next of nexts) {
+        const childContext: ParseContext = {
+          next,
+        };
+
+        const nextId = next === undefined ? "" : next.id;
+        const cacheKey = `${id}-${state.index}-${nextId}`;
+        const cached = cacheKey === null ? null : cache.get(cacheKey);
+
+        if (cached) {
+          yield* cached;
+        } else {
+          console.log(
+            `${
+              state.index === str.length
+                ? `${chalk.dim(str)}`
+                : `${str.slice(0, state.index)}${
+                    str[state.index] === undefined
+                      ? ""
+                      : chalk.white(chalk.bgBlue(str[state.index]))
+                  }${str.slice(state.index + 1)}`
+            }(${str.length})`,
+            "with",
+            expr.__debug_info,
+            "at",
+            state
+          );
+
+          const result = expr._translate(
+            str,
+            {
+              index: state.index,
+            },
+            childContext
+          );
+
+          // 実行済みのgeneratorをキャッシュしても意味ない
+          // if (cacheKey !== null) {
+          //   cache.set(cacheKey, result);
+          // }
+
+          yield* result;
+          // for (const res of result) {
+          //   if (res.error) {
+          //     yield res;
+          //   } else {
+          //     if (next === undefined) {
+          //       yield res;
+          //     } else {
+          //       for (const nextRes of next._translate(
+          //         str,
+          //         res.state,
+          //         childContext
+          //       )) {
+          //         if (nextRes.error) {
+          //           yield {
+          //             error: nextRes.error,
+          //             state: nextRes.state,
+          //             value: res.value,
+          //           };
+          //         } else {
+          //           if (isFlatExpression(next) && Array.isArray(nextRes.value)) {
+          //             yield {
+          //               error: undefined,
+          //               state: nextRes.state,
+          //               value: [res.value, ...nextRes.value],
+          //             };
+          //           } else {
+          //             yield {
+          //               error: undefined,
+          //               state: nextRes.state,
+          //               value: [res.value, nextRes.value],
+          //             };
+          //           }
+          //         }
+          //       }
+          //     }
+          //   }
+          // }
+        }
       }
     },
   } as T;
@@ -268,7 +299,8 @@ function normalizeSeqExpr(
 
   while (i < exprs.length) {
     // skip empty expression.
-    exprs[i].next = exprs.find((expr, j) => j > i && !isEmptyExpression(expr));
+    const next = exprs.find((expr, j) => j > i && !isEmptyExpression(expr));
+    exprs[i].nexts = next === undefined ? next : [next];
     console.log(i, ".next", exprs[i + 1]?.__debug_info);
 
     i = (i + 1) | 0;
@@ -400,9 +432,9 @@ export function seq(
   });
 }
 
-// function isOrExpression(x: any): x is OrExpression {
-//   return x["type"] === "or" && isExpression(x);
-// }
+function isOrExpression(x: any): x is OrExpression {
+  return x["type"] === "or" && isExpression(x);
+}
 type OrExpression = ExpressionLeaf & {
   type: "or";
   a: ExpressionLeaf;
